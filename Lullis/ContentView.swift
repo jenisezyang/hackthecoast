@@ -667,10 +667,6 @@ struct VitalDetailSheet: View {
 
     var body: some View {
         VStack(spacing: 18) {
-            Capsule()
-                .fill(Color.secondary.opacity(0.3))
-                .frame(width: 44, height: 5)
-                .padding(.top, 8)
 
             Text(title)
                 .font(.system(size: 28, weight: .bold, design: .rounded))
