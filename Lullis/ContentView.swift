@@ -133,6 +133,13 @@ private func bracketFromBirthday(_ birthday: Date) -> AgeBracket {
     return .year1
 }
 
+// MARK: - Vital Detail Selection
+
+enum VitalID: String, Identifiable {
+    case temp, hr, spo2, bp
+    var id: String { rawValue }
+}
+
 // MARK: - Root Router (Setup -> Tabs)
 
 struct ContentView: View {
@@ -303,10 +310,10 @@ struct SetupView: View {
                     .padding(.top, 6)
                 }
                 .padding(16)
-                .padding(.bottom, 140) // ✅ extra space
+                .padding(.bottom, 140)
             }
             .scrollIndicators(.visible)
-            .safeAreaInset(edge: .bottom) { Color.clear.frame(height: 20) } // ✅ reserves space above tab bar
+            .safeAreaInset(edge: .bottom) { Color.clear.frame(height: 20) }
         }
         .onAppear {
             birthday = Date(timeIntervalSince1970: birthdayEpoch)
@@ -353,7 +360,7 @@ struct MultipleChoiceRow: View {
     }
 }
 
-// MARK: - Dashboard Screen (SCROLLABLE)
+// MARK: - Dashboard Screen (SCROLLABLE + TAP-TO-DETAIL)
 
 struct DashboardView: View {
     let babyName: String
@@ -361,6 +368,7 @@ struct DashboardView: View {
     let conditions: Set<String>
 
     @StateObject private var bt: BluetoothManager
+    @State private var selectedVital: VitalID?
 
     init(babyName: String, birthday: Date, conditions: Set<String>) {
         self.babyName = babyName
@@ -403,7 +411,7 @@ struct DashboardView: View {
                         rangeText: base.tempC.label(decimals: 1),
                         status: tempStatus,
                         icon: "thermometer"
-                    )
+                    ) { selectedVital = .temp }
 
                     VitalCard(
                         title: "Heart Rate",
@@ -411,7 +419,7 @@ struct DashboardView: View {
                         rangeText: base.heartRateBpm.label(decimals: 0),
                         status: hrStatus,
                         icon: "heart.fill"
-                    )
+                    ) { selectedVital = .hr }
 
                     VitalCard(
                         title: "Oxygen Level (SpO₂)",
@@ -419,7 +427,7 @@ struct DashboardView: View {
                         rangeText: base.spo2.label(decimals: 0),
                         status: spo2Status,
                         icon: "waveform.path.ecg"
-                    )
+                    ) { selectedVital = .spo2 }
 
                     VitalCard(
                         title: "Blood Pressure",
@@ -427,7 +435,7 @@ struct DashboardView: View {
                         rangeText: "SYS \(base.sysBP.label()) • DIA \(base.diaBP.label())",
                         status: maxStatus(sysStatus, diaStatus),
                         icon: "drop.fill"
-                    )
+                    ) { selectedVital = .bp }
 
                     if anyDanger {
                         Button {
@@ -459,13 +467,67 @@ struct DashboardView: View {
                             .cornerRadius(14)
                             .padding(.horizontal, 16)
                     }
-
                 }
                 .padding(.top, 10)
-                .padding(.bottom, 140) // ✅ extra space
+                .padding(.bottom, 140)
             }
             .scrollIndicators(.visible)
-            .safeAreaInset(edge: .bottom) { Color.clear.frame(height: 20) } // ✅ reserves space above tab bar
+            .safeAreaInset(edge: .bottom) { Color.clear.frame(height: 20) }
+        }
+        .sheet(item: $selectedVital) { id in
+            switch id {
+            case .temp:
+                VitalDetailSheet(
+                    title: "Body Temperature",
+                    currentValue: String(format: "%.1f °C", bt.temperature),
+                    primaryLabel: "Typical range",
+                    primaryRange: base.tempC,
+                    secondaryLabel: nil,
+                    secondaryRange: nil,
+                    status: tempStatus,
+                    ageBracket: bracket,
+                    conditions: conditions
+                )
+
+            case .hr:
+                VitalDetailSheet(
+                    title: "Heart Rate",
+                    currentValue: "\(Int(bt.heartRate)) bpm",
+                    primaryLabel: "Typical range",
+                    primaryRange: base.heartRateBpm,
+                    secondaryLabel: nil,
+                    secondaryRange: nil,
+                    status: hrStatus,
+                    ageBracket: bracket,
+                    conditions: conditions
+                )
+
+            case .spo2:
+                VitalDetailSheet(
+                    title: "Oxygen Level (SpO₂)",
+                    currentValue: "\(Int(bt.spo2))%",
+                    primaryLabel: "Typical range",
+                    primaryRange: base.spo2,
+                    secondaryLabel: nil,
+                    secondaryRange: nil,
+                    status: spo2Status,
+                    ageBracket: bracket,
+                    conditions: conditions
+                )
+
+            case .bp:
+                VitalDetailSheet(
+                    title: "Blood Pressure",
+                    currentValue: "\(Int(bt.bpSys)) / \(Int(bt.bpDia)) mmHg",
+                    primaryLabel: "Systolic (SYS) typical range",
+                    primaryRange: base.sysBP,
+                    secondaryLabel: "Diastolic (DIA) typical range",
+                    secondaryRange: base.diaBP,
+                    status: maxStatus(sysStatus, diaStatus),
+                    ageBracket: bracket,
+                    conditions: conditions
+                )
+            }
         }
     }
 
@@ -538,45 +600,150 @@ struct DashboardView: View {
     }
 }
 
+// MARK: - Tappable Vital Card
+
 struct VitalCard: View {
     let title: String
     let value: String
     let rangeText: String?
     let status: VitalStatus
     let icon: String
+    let onTap: () -> Void
 
     var body: some View {
-        HStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(status.color.opacity(0.20))
-                    .frame(width: 52, height: 52)
-                Image(systemName: icon)
-                    .font(.system(size: 22, weight: .semibold))
-                    .foregroundColor(status.color)
+        Button(action: onTap) {
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(status.color.opacity(0.20))
+                        .frame(width: 52, height: 52)
+                    Image(systemName: icon)
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundColor(status.color)
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title).font(.subheadline).foregroundColor(.secondary)
+                    Text(value).font(.system(size: 26, weight: .bold, design: .rounded))
+                    if let rangeText {
+                        Text("Typical: \(rangeText)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.secondary)
+                    .padding(.trailing, 2)
+            }
+            .padding(16)
+            .background(Color.white.opacity(0.75))
+            .cornerRadius(18)
+            .shadow(color: Color.black.opacity(0.08), radius: 12, x: 0, y: 6)
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 16)
+    }
+}
+
+// MARK: - Vital Detail Sheet
+
+struct VitalDetailSheet: View {
+    let title: String
+    let currentValue: String
+
+    let primaryLabel: String
+    let primaryRange: VitalRange
+
+    let secondaryLabel: String?
+    let secondaryRange: VitalRange?
+
+    let status: VitalStatus
+    let ageBracket: AgeBracket
+    let conditions: Set<String>
+
+    var body: some View {
+        VStack(spacing: 18) {
+            Capsule()
+                .fill(Color.secondary.opacity(0.3))
+                .frame(width: 44, height: 5)
+                .padding(.top, 8)
+
+            Text(title)
+                .font(.system(size: 28, weight: .bold, design: .rounded))
+
+            Text(currentValue)
+                .font(.system(size: 34, weight: .bold))
+                .foregroundColor(status.color)
+
+            Text("Comparison group: \(ageBracket.rawValue)")
+                .foregroundColor(.secondary)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(primaryLabel).font(.headline)
+                Text(primaryRange.label(decimals: title == "Body Temperature" ? 1 : 0))
+                    .font(.title3.weight(.semibold))
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding()
+            .background(Color.white.opacity(0.75))
+            .cornerRadius(14)
+
+            if let secondaryLabel, let secondaryRange {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(secondaryLabel).font(.headline)
+                    Text(secondaryRange.label(decimals: 0))
+                        .font(.title3.weight(.semibold))
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding()
+                .background(Color.white.opacity(0.75))
+                .cornerRadius(14)
             }
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title).font(.subheadline).foregroundColor(.secondary)
-                Text(value).font(.system(size: 26, weight: .bold, design: .rounded))
-                if let rangeText {
-                    Text("Normal: \(rangeText)")
+            VStack(alignment: .leading, spacing: 8) {
+                Text("What this means").font(.headline)
+                Text(explanationText)
+                    .foregroundColor(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding()
+            .background(status.color.opacity(0.12))
+            .cornerRadius(14)
+
+            if !conditions.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Health context").font(.headline)
+                    Text("Selected conditions may require closer monitoring:")
+                        .foregroundColor(.secondary)
+                    Text(conditions.sorted().joined(separator: " • "))
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding()
+                .background(Color.gray.opacity(0.10))
+                .cornerRadius(14)
             }
 
             Spacer()
-
-            Circle()
-                .fill(status.color)
-                .frame(width: 14, height: 14)
         }
-        .padding(16)
-        .background(Color.white.opacity(0.75))
-        .cornerRadius(18)
-        .shadow(color: Color.black.opacity(0.08), radius: 12, x: 0, y: 6)
-        .padding(.horizontal, 16)
+        .padding()
+        .presentationDetents([.medium, .large])
+    }
+
+    private var explanationText: String {
+        switch status {
+        case .normal:
+            return "This reading is within the typical range for babies of a similar age group."
+        case .warning:
+            return "This reading is near the edge of the typical range. Continue monitoring and watch for trends."
+        case .danger:
+            return "This reading is outside the typical range. Consider seeking medical advice."
+        }
     }
 }
 
@@ -634,10 +801,10 @@ struct HospitalsView: View {
                     Spacer(minLength: 10)
                 }
                 .padding(16)
-                .padding(.bottom, 140) // ✅ extra space
+                .padding(.bottom, 140)
             }
             .scrollIndicators(.visible)
-            .safeAreaInset(edge: .bottom) { Color.clear.frame(height: 20) } // ✅ reserves space above tab bar
+            .safeAreaInset(edge: .bottom) { Color.clear.frame(height: 20) }
         }
     }
 
@@ -701,10 +868,10 @@ struct ProfileView: View {
                     Spacer(minLength: 10)
                 }
                 .padding(16)
-                .padding(.bottom, 140) // ✅ extra space
+                .padding(.bottom, 140)
             }
             .scrollIndicators(.visible)
-            .safeAreaInset(edge: .bottom) { Color.clear.frame(height: 20) } // ✅ reserves space above tab bar
+            .safeAreaInset(edge: .bottom) { Color.clear.frame(height: 20) }
         }
     }
 
@@ -720,7 +887,7 @@ struct ProfileView: View {
     }
 }
 
-// MARK: - Bluetooth Manager (Prototype, no Timer -> avoids MainActor Sendable issues)
+// MARK: - Bluetooth Manager (Prototype)
 //
 // Expected strings from Arduino later:
 // "TEMP:36.9,HR:132,SPO2:98,BPSYS:72,BPDIA:44"
