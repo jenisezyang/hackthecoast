@@ -303,9 +303,10 @@ struct SetupView: View {
                     .padding(.top, 6)
                 }
                 .padding(16)
-                .padding(.bottom, 100) // ✅ prevents tab bar overlap
+                .padding(.bottom, 140) // ✅ extra space
             }
             .scrollIndicators(.visible)
+            .safeAreaInset(edge: .bottom) { Color.clear.frame(height: 20) } // ✅ reserves space above tab bar
         }
         .onAppear {
             birthday = Date(timeIntervalSince1970: birthdayEpoch)
@@ -470,9 +471,10 @@ struct DashboardView: View {
                     .padding(.bottom, 18)
                 }
                 .padding(.top, 10)
-                .padding(.bottom, 100) // ✅ prevents tab bar overlap
+                .padding(.bottom, 140) // ✅ extra space
             }
             .scrollIndicators(.visible)
+            .safeAreaInset(edge: .bottom) { Color.clear.frame(height: 20) } // ✅ reserves space above tab bar
         }
     }
 
@@ -641,9 +643,10 @@ struct HospitalsView: View {
                     Spacer(minLength: 10)
                 }
                 .padding(16)
-                .padding(.bottom, 100) // ✅ prevents tab bar overlap
+                .padding(.bottom, 140) // ✅ extra space
             }
             .scrollIndicators(.visible)
+            .safeAreaInset(edge: .bottom) { Color.clear.frame(height: 20) } // ✅ reserves space above tab bar
         }
     }
 
@@ -707,9 +710,10 @@ struct ProfileView: View {
                     Spacer(minLength: 10)
                 }
                 .padding(16)
-                .padding(.bottom, 100) // ✅ prevents tab bar overlap
+                .padding(.bottom, 140) // ✅ extra space
             }
             .scrollIndicators(.visible)
+            .safeAreaInset(edge: .bottom) { Color.clear.frame(height: 20) } // ✅ reserves space above tab bar
         }
     }
 
