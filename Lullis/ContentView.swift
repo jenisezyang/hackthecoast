@@ -133,7 +133,7 @@ private func bracketFromBirthday(_ birthday: Date) -> AgeBracket {
     return .year1
 }
 
-// MARK: - Root Router (Setup -> Dashboard)
+// MARK: - Root Router (Setup -> Tabs)
 
 struct ContentView: View {
     @AppStorage("hasCompletedSetup") private var hasCompletedSetup = false
@@ -148,7 +148,7 @@ struct ContentView: View {
 
     var body: some View {
         if hasCompletedSetup {
-            DashboardView(babyName: babyName, birthday: birthday, conditions: conditionStrings)
+            MainTabView(babyName: babyName, birthday: birthday, conditions: conditionStrings)
         } else {
             SetupView(
                 hasCompletedSetup: $hasCompletedSetup,
@@ -156,6 +156,27 @@ struct ContentView: View {
                 birthdayEpoch: $birthdayEpoch,
                 conditionsCSV: $conditionsCSV
             )
+        }
+    }
+}
+
+// MARK: - Main Tabs (Dashboard + Hospitals + Profile)
+
+struct MainTabView: View {
+    let babyName: String
+    let birthday: Date
+    let conditions: Set<String>
+
+    var body: some View {
+        TabView {
+            DashboardView(babyName: babyName, birthday: birthday, conditions: conditions)
+                .tabItem { Label("Dashboard", systemImage: "waveform.path.ecg") }
+
+            HospitalsView()
+                .tabItem { Label("Hospitals", systemImage: "cross.case.fill") }
+
+            ProfileView(babyName: babyName, birthday: birthday, conditions: conditions)
+                .tabItem { Label("Profile", systemImage: "person.fill") }
         }
     }
 }
@@ -270,7 +291,7 @@ struct SetupView: View {
                         conditionsCSV = selected.map { $0.rawValue }.sorted().joined(separator: ",")
                         hasCompletedSetup = true
                     } label: {
-                        Text("Continue to Dashboard")
+                        Text("Continue")
                             .font(.headline)
                             .foregroundColor(.white)
                             .frame(maxWidth: .infinity)
@@ -408,9 +429,7 @@ struct DashboardView: View {
 
                     if anyDanger {
                         Button {
-                            if let url = URL(string: "http://maps.apple.com/?q=hospital") {
-                                UIApplication.shared.open(url)
-                            }
+                            HospitalsView.openHospitalsAppleMaps()
                         } label: {
                             HStack {
                                 Image(systemName: "mappin.and.ellipse")
@@ -440,7 +459,6 @@ struct DashboardView: View {
                     }
 
                     Button(role: .destructive) {
-                        // Reset onboarding for testing
                         UserDefaults.standard.set(false, forKey: "hasCompletedSetup")
                     } label: {
                         Text("Reset Setup (dev)")
@@ -567,8 +585,130 @@ struct VitalCard: View {
     }
 }
 
-// MARK: - Bluetooth Manager (Prototype)
-// No Timer (avoids main-actor + sendable closure errors)
+// MARK: - Hospitals Tab (always accessible)
+
+struct HospitalsView: View {
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: [Color(red: 0.92, green: 0.96, blue: 1.0), Color(red: 1.0, green: 0.94, blue: 0.96)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    Text("Nearby Care")
+                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                        .padding(.top, 10)
+
+                    Text("Search anytime (not only during alerts).")
+                        .foregroundColor(.secondary)
+
+                    Button {
+                        HospitalsView.openHospitalsAppleMaps()
+                    } label: {
+                        HStack {
+                            Image(systemName: "cross.case.fill")
+                            Text("Find nearby hospitals")
+                        }
+                        .font(.headline)
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.red)
+                        .cornerRadius(14)
+                    }
+
+                    Button {
+                        HospitalsView.openChildHospitalsAppleMaps()
+                    } label: {
+                        HStack {
+                            Image(systemName: "stethoscope")
+                            Text("Find children’s hospitals")
+                        }
+                        .font(.headline)
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.blue)
+                        .cornerRadius(14)
+                    }
+
+                    Spacer(minLength: 10)
+                }
+                .padding(16)
+            }
+        }
+    }
+
+    static func openHospitalsAppleMaps() {
+        if let url = URL(string: "http://maps.apple.com/?q=hospital") {
+            UIApplication.shared.open(url)
+        }
+    }
+
+    static func openChildHospitalsAppleMaps() {
+        if let url = URL(string: "http://maps.apple.com/?q=children%20hospital") {
+            UIApplication.shared.open(url)
+        }
+    }
+}
+
+// MARK: - Profile Tab
+
+struct ProfileView: View {
+    let babyName: String
+    let birthday: Date
+    let conditions: Set<String>
+
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: [Color(red: 0.90, green: 0.95, blue: 1.0), Color(red: 1.0, green: 0.95, blue: 0.95)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    Text("Profile")
+                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                        .padding(.top, 10)
+
+                    infoCard(title: "Baby") { Text(babyName).font(.headline) }
+                    infoCard(title: "Birthday") { Text(birthday.formatted(date: .abbreviated, time: .omitted)) }
+
+                    infoCard(title: "Conditions") {
+                        if conditions.isEmpty {
+                            Text("None").foregroundColor(.secondary)
+                        } else {
+                            Text(conditions.sorted().joined(separator: " • "))
+                        }
+                    }
+
+                    Spacer(minLength: 10)
+                }
+                .padding(16)
+            }
+        }
+    }
+
+    private func infoCard<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).font(.subheadline).foregroundColor(.secondary)
+            content()
+        }
+        .padding(16)
+        .background(Color.white.opacity(0.75))
+        .cornerRadius(18)
+        .shadow(color: Color.black.opacity(0.08), radius: 12, x: 0, y: 6)
+    }
+}
+
+// MARK: - Bluetooth Manager (Prototype, no Timer -> avoids MainActor Sendable issues)
 //
 // Expected strings from Arduino later:
 // "TEMP:36.9,HR:132,SPO2:98,BPSYS:72,BPDIA:44"
