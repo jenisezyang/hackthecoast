@@ -224,13 +224,13 @@ struct SetupView: View {
                         }
                     }
 
-                    card(title: "Conditions (multiple choice)") {
+                    card(title: "Conditions") {
                         VStack(alignment: .leading, spacing: 10) {
                             Button {
                                 withAnimation { showConditions.toggle() }
                             } label: {
                                 HStack {
-                                    Text(selected.isEmpty ? "Select conditions (optional)" : "\(selected.count) selected")
+                                    Text(selected.isEmpty ? "Select health conditions" : "\(selected.count) selected")
                                         .foregroundColor(selected.isEmpty ? .secondary : .primary)
                                     Spacer()
                                     Image(systemName: showConditions ? "chevron.up" : "chevron.down")
