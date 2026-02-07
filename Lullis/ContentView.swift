@@ -303,6 +303,7 @@ struct SetupView: View {
                     .padding(.top, 6)
                 }
                 .padding(16)
+                .padding(.bottom, 100) // ✅ prevents tab bar overlap
             }
             .scrollIndicators(.visible)
         }
@@ -469,6 +470,7 @@ struct DashboardView: View {
                     .padding(.bottom, 18)
                 }
                 .padding(.top, 10)
+                .padding(.bottom, 100) // ✅ prevents tab bar overlap
             }
             .scrollIndicators(.visible)
         }
@@ -639,7 +641,9 @@ struct HospitalsView: View {
                     Spacer(minLength: 10)
                 }
                 .padding(16)
+                .padding(.bottom, 100) // ✅ prevents tab bar overlap
             }
+            .scrollIndicators(.visible)
         }
     }
 
@@ -689,10 +693,23 @@ struct ProfileView: View {
                         }
                     }
 
+                    Button(role: .destructive) {
+                        UserDefaults.standard.set(false, forKey: "hasCompletedSetup")
+                    } label: {
+                        Text("Reset Setup (dev)")
+                            .font(.subheadline)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .padding()
+                    .background(Color.white.opacity(0.75))
+                    .cornerRadius(14)
+
                     Spacer(minLength: 10)
                 }
                 .padding(16)
+                .padding(.bottom, 100) // ✅ prevents tab bar overlap
             }
+            .scrollIndicators(.visible)
         }
     }
 
