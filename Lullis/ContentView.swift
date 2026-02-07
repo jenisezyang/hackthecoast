@@ -460,15 +460,6 @@ struct DashboardView: View {
                             .padding(.horizontal, 16)
                     }
 
-                    Button(role: .destructive) {
-                        UserDefaults.standard.set(false, forKey: "hasCompletedSetup")
-                    } label: {
-                        Text("Reset Setup (dev)")
-                            .font(.subheadline)
-                            .frame(maxWidth: .infinity)
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 18)
                 }
                 .padding(.top, 10)
                 .padding(.bottom, 140) // ✅ extra space
