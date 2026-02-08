@@ -623,7 +623,7 @@ struct DashboardView: View {
                     conditions: conditions,
                     sex: babySex,
                     weightKg: babyWeightKg,
-                    refreshValue: demo.temperature
+                    refreshValue: demo.heartRate
                 )
             case .spo2:
                 VitalDetailSheet(
@@ -638,7 +638,7 @@ struct DashboardView: View {
                     conditions: conditions,
                     sex: babySex,
                     weightKg: babyWeightKg,
-                    refreshValue: demo.temperature
+                    refreshValue: demo.spo2
                 )
             case .bp:
                 VitalDetailSheet(
@@ -653,7 +653,7 @@ struct DashboardView: View {
                     conditions: conditions,
                     sex: babySex,
                     weightKg: babyWeightKg,
-                    refreshValue: demo.temperature
+                    refreshValue: demo.bpSys
                 )
             }
         }
@@ -1007,35 +1007,35 @@ struct VitalDetailSheet: View {
                 .padding(.horizontal, 16)
                 .padding(.bottom, 24)
             }
-            
-            .onChange(of: refreshValue) { _, newVal in
-                guard let old = lastAIValue, old != 0 else {
-                    lastAIValue = newVal
-                    return
-                }
 
-                let pct = abs((newVal - old) / old) * 100.0
-                if pct >= 2.0 {
-                    Task { await loadAI(force: true) }
-                    lastAIValue = newVal
-                }
-            }
-            .onChange(of: statusLabel) { _, newStatus in
-                if let last = lastAIStatus, last != newStatus {
-                    Task { await loadAI(force: true) }
-                }
-                lastAIStatus = newStatus
-            }
         }
         .scrollIndicators(.visible)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
 
-        // ✅ call once when sheet opens
+
         .task {
-            lastAIValue = refreshValue
-            lastAIStatus = statusLabel
-            await loadAIIfNeeded()
+                lastAIValue = refreshValue
+                lastAIStatus = statusLabel
+                await loadAI()
+            }
+            .onChange(of: refreshValue) { _, newVal in
+                guard let old = lastAIValue, old != 0 else {
+                    lastAIValue = newVal
+                    return
+                }
+                let pct = abs((newVal - old) / old) * 100.0
+                if pct >= 2.0 {
+                    Task { await loadAI() }
+                    lastAIValue = newVal
+                }
+            }
+            .onChange(of: statusLabel) { _, newStatus in
+                if let last = lastAIStatus, last != newStatus {
+                    Task { await loadAI() }
+                }
+                lastAIStatus = newStatus
+            }
         }
 
         // ✅ call again when these change (re-opens or different vitals)
@@ -1048,7 +1048,7 @@ struct VitalDetailSheet: View {
         .onChange(of: conditions.sorted().joined(separator: ",")) { _, _ in Task { await loadAI() } }
     }
     
-    private var refreshValue: Double {
+    private var refreshSignal: Double {
         switch title {
         case "Heart Rate":
             return Double(currentValue.components(separatedBy: " ").first ?? "") ?? 0
