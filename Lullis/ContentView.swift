@@ -910,11 +910,7 @@ struct DangerCard: View {
 
 // MARK: - Vital Detail Sheet
 
-// VitalDetailSheet (drop-in replacement)
-// Put this in ContentView.swift replacing your existing VitalDetailSheet.
-// Requires: import SwiftUI, import Combine, import UIKit (Combine only needed elsewhere; fine to keep)
 
-import SwiftUI
 
 struct VitalDetailSheet: View {
     let title: String
