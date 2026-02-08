@@ -970,7 +970,7 @@ struct HospitalsView: View {
                         .font(.system(size: 28, weight: .bold, design: .rounded))
                         .padding(.top, 10)
 
-                    Text("Search anytime (not only during alerts).")
+                    Text("Search for hospitals near you")
                         .foregroundColor(.secondary)
 
                     Button {
