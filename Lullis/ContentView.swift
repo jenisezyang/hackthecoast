@@ -12,6 +12,12 @@ enum LullisTheme {
 
     static let cardFill = Color.white.opacity(0.86)
     static let shadow = Color.black.opacity(0.08)
+
+    // #CCCCFF + a few slightly darker shades (same hue family)
+    static let purple1 = Color(red: 204/255, green: 204/255, blue: 255/255) // #CCCCFF
+    static let purple2 = Color(red: 184/255, green: 184/255, blue: 255/255)
+    static let purple3 = Color(red: 163/255, green: 163/255, blue: 255/255)
+    static let purple4 = Color(red: 143/255, green: 143/255, blue: 255/255)
 }
 
 // MARK: - Backend Models
@@ -216,7 +222,7 @@ struct SetupView: View {
     @State private var birthday: Date = Date()
     @State private var selected = Set<BabyCondition>()
     @State private var showConditions = false
-    
+
     @AppStorage("babySex") private var babySex: String = Sex.male.rawValue
     @AppStorage("babyWeightKg") private var babyWeightKg: Double = 3.5
 
@@ -255,7 +261,7 @@ struct SetupView: View {
                                     .datePickerStyle(.compact)
                                     .labelsHidden()
                             }
-                            
+
                             labeled("Sex") {
                                 Picker("", selection: $selectedSex) {
                                     ForEach(Sex.allCases) { s in
@@ -270,7 +276,6 @@ struct SetupView: View {
                                     .keyboardType(.decimalPad)
                                     .textFieldStyle(.roundedBorder)
                                     .onChange(of: weightText) { _, newValue in
-                                        // keep it numeric-ish; don't crash if empty
                                         let cleaned = newValue.replacingOccurrences(of: ",", with: ".")
                                         if let v = Double(cleaned) { babyWeightKg = v }
                                     }
@@ -350,7 +355,6 @@ struct SetupView: View {
                     }
                     .disabled(babyName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
-                    // no magic .padding(.bottom, 140) here
                     Spacer(minLength: 10)
                 }
                 .padding(16)
@@ -404,7 +408,7 @@ struct MultipleChoiceRow: View {
     }
 }
 
-// MARK: - Dashboard Screen (FIXED LAYOUT: one ScrollView + one VStack + grid)
+// MARK: - Dashboard Screen
 
 struct DashboardView: View {
     let babyName: String
@@ -414,7 +418,6 @@ struct DashboardView: View {
     @StateObject private var bt: BluetoothManager
     @State private var selectedVital: VitalID?
 
-    // simple demo “live update” so UI changes each second (remove if you don’t want it)
     @State private var tick: Int = 0
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
@@ -444,6 +447,9 @@ struct DashboardView: View {
 
     private var anyDanger: Bool { overallStatus == .danger }
 
+    // demo controls allowed only when NOT connected
+    private var demoEnabled: Bool { !bt.isConnected }
+
     private let columns = [
         GridItem(.flexible(), spacing: 12),
         GridItem(.flexible(), spacing: 12)
@@ -464,58 +470,85 @@ struct DashboardView: View {
                     LazyVGrid(columns: columns, spacing: 12) {
                         VitalTile(
                             icon: "heart.fill",
-                            iconTint: .red,
+                            iconTint: LullisTheme.purple4,
                             title: "Heart Rate",
                             valueBig: "\(Int(bt.heartRate))",
                             unit: "BPM",
-                            sparkKind: .red
+                            sparkColor: LullisTheme.purple4
                         ) { selectedVital = .hr }
 
                         VitalTile(
                             icon: "wind",
-                            iconTint: .blue,
+                            iconTint: LullisTheme.purple3,
                             title: "Oxygen (SpO₂)",
                             valueBig: "\(Int(bt.spo2))",
                             unit: "%",
-                            sparkKind: .blue
+                            sparkColor: LullisTheme.purple3
                         ) { selectedVital = .spo2 }
 
                         VitalTile(
                             icon: "thermometer",
-                            iconTint: .orange,
+                            iconTint: LullisTheme.purple2,
                             title: "Body Temp",
                             valueBig: String(format: "%.1f", bt.temperature),
                             unit: "°C",
-                            sparkKind: .orange
+                            sparkColor: LullisTheme.purple2
                         ) { selectedVital = .temp }
 
                         VitalTile(
                             icon: "drop.fill",
-                            iconTint: .purple,
+                            iconTint: LullisTheme.purple1,
                             title: "Blood Pressure",
                             valueBig: "\(Int(bt.bpSys))/\(Int(bt.bpDia))",
                             unit: "mmHg",
-                            sparkKind: .purple
+                            sparkColor: LullisTheme.purple1
                         ) { selectedVital = .bp }
                     }
 
-                    Text("SIMULATE CONDITIONS")
-                        .font(.caption.weight(.semibold))
-                        .foregroundColor(.secondary)
-                        .padding(.top, 4)
+                    // SIMULATE CONDITIONS (locked while connected)
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Text("SIMULATE CONDITIONS")
+                                .font(.caption.weight(.semibold))
+                                .foregroundColor(.secondary)
 
-                    HStack(spacing: 12) {
-                        SmallActionPill(icon: "arrow.triangle.2.circlepath", label: "Rollover") {
-                            // demo nudge
-                            bt.heartRate = max(80, bt.heartRate - 8)
+                            Spacer()
+
+                            if !demoEnabled {
+                                Text("Locked while connected")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundColor(.black.opacity(0.65))
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(LullisTheme.purple1.opacity(0.9)) // #CCCCFF shade
+                                    .clipShape(Capsule())
+                            }
                         }
-                        SmallActionPill(icon: "exclamationmark.triangle", label: "Hypoxia") {
-                            bt.spo2 = max(80, bt.spo2 - 5)
-                        }
-                        SmallActionPill(icon: "thermometer.high", label: "Fever") {
-                            bt.temperature = min(40.0, bt.temperature + 0.4)
+
+                        HStack(spacing: 12) {
+                            SmallActionPill(icon: "arrow.triangle.2.circlepath", label: "Rollover") {
+                                guard demoEnabled else { return }
+                                bt.applyDemo(.rollover)
+                            }
+                            .disabled(!demoEnabled)
+                            .opacity(demoEnabled ? 1 : 0.45)
+
+                            SmallActionPill(icon: "exclamationmark.triangle", label: "Hypoxia") {
+                                guard demoEnabled else { return }
+                                bt.applyDemo(.hypoxia)
+                            }
+                            .disabled(!demoEnabled)
+                            .opacity(demoEnabled ? 1 : 0.45)
+
+                            SmallActionPill(icon: "thermometer.high", label: "Fever") {
+                                guard demoEnabled else { return }
+                                bt.applyDemo(.fever)
+                            }
+                            .disabled(!demoEnabled)
+                            .opacity(demoEnabled ? 1 : 0.45)
                         }
                     }
+                    .padding(.top, 4)
 
                     if anyDanger {
                         DangerCard {
@@ -547,9 +580,9 @@ struct DashboardView: View {
         }
         .onReceive(timer) { _ in
             tick += 1
-            // tiny “alive” movement so it changes each second (optional)
-            if !bt.isConnected {
-                bt.temperature = 36.6 + (Double((tick % 6)) * 0.05)
+            // only animate demo vitals when NOT connected
+            if demoEnabled {
+                bt.applyDemo(.heartbeatTick(tick))
             }
         }
         .sheet(item: $selectedVital) { id in
@@ -647,6 +680,7 @@ struct DashboardView: View {
                     Image(systemName: "gearshape")
                         .foregroundColor(.secondary)
                 }
+
                 Text(bracket.rawValue)
                     .font(.caption)
                     .foregroundColor(.secondary)
@@ -724,15 +758,13 @@ struct StatusBanner: View {
 
 // MARK: - Vital Tile (Grid card)
 
-enum SparkKind { case red, blue, orange, purple }
-
 struct VitalTile: View {
     let icon: String
     let iconTint: Color
     let title: String
     let valueBig: String
     let unit: String
-    let sparkKind: SparkKind
+    let sparkColor: Color
     let onTap: () -> Void
 
     var body: some View {
@@ -740,7 +772,7 @@ struct VitalTile: View {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     ZStack {
-                        Circle().fill(iconTint.opacity(0.12))
+                        Circle().fill(iconTint.opacity(0.18))
                             .frame(width: 40, height: 40)
                         Image(systemName: icon)
                             .foregroundColor(iconTint)
@@ -764,9 +796,9 @@ struct VitalTile: View {
                         .foregroundColor(.secondary)
                 }
 
-                SparkLine(kind: sparkKind)
+                SparkLine(color: sparkColor)
                     .frame(height: 22)
-                    .opacity(0.35)
+                    .opacity(0.55)
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -779,7 +811,7 @@ struct VitalTile: View {
 }
 
 struct SparkLine: View {
-    let kind: SparkKind
+    let color: Color
 
     var body: some View {
         GeometryReader { geo in
@@ -787,7 +819,6 @@ struct SparkLine: View {
             let h = geo.size.height
 
             Path { p in
-                // simple “spark” shape (static, but looks like a mini chart)
                 p.move(to: CGPoint(x: 0, y: h * 0.70))
                 p.addCurve(to: CGPoint(x: w * 0.25, y: h * 0.45),
                            control1: CGPoint(x: w * 0.10, y: h * 0.85),
@@ -801,15 +832,6 @@ struct SparkLine: View {
                 p.addLine(to: CGPoint(x: w, y: h * 0.55))
             }
             .stroke(color, lineWidth: 3)
-        }
-    }
-
-    private var color: Color {
-        switch kind {
-        case .red: return .red
-        case .blue: return .blue
-        case .orange: return .orange
-        case .purple: return .purple
         }
     }
 }
@@ -884,7 +906,7 @@ struct DangerCard: View {
     }
 }
 
-// MARK: - Vital Detail Sheet ✅ OPTION B (stable header + scroll)
+// MARK: - Vital Detail Sheet
 
 struct VitalDetailSheet: View {
     let title: String
@@ -904,7 +926,6 @@ struct VitalDetailSheet: View {
         ScrollView {
             VStack(spacing: 18) {
 
-                // fixed header spacing while dragging sheet
                 VStack(spacing: 12) {
                     Text(title)
                         .font(.system(size: 28, weight: .bold, design: .rounded))
@@ -1072,14 +1093,28 @@ func avatarAssetName(for sexRaw: String) -> String {
     }
 }
 
-// MARK: - Profile Tab (dev reset kept here only)
+// MARK: - Profile Tab (2-up grid + stacked condition pills)
 
 struct ProfileView: View {
     let babyName: String
     let birthday: Date
     let conditions: Set<String>
+
     @AppStorage("babySex") private var babySex: String = Sex.male.rawValue
     @AppStorage("babyWeightKg") private var babyWeightKg: Double = 3.5
+
+    private let twoCols = [
+        GridItem(.flexible(), spacing: 12),
+        GridItem(.flexible(), spacing: 12)
+    ]
+
+    private var ageText: String {
+        let days = max(0, daysBetween(birthday, Date()))
+        if days < 30 { return "\(days) days" }
+        let months = days / 30
+        if months < 12 { return "\(months) months" }
+        return "\(months / 12) years"
+    }
 
     var body: some View {
         ZStack {
@@ -1090,6 +1125,9 @@ struct ProfileView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     Text("Profile")
+                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                        .padding(.top, 10)
+
                     // Avatar card
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Avatar")
@@ -1108,25 +1146,25 @@ struct ProfileView: View {
                     .background(LullisTheme.cardFill)
                     .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                     .shadow(color: LullisTheme.shadow, radius: 12, x: 0, y: 6)
-                    
-                    infoCard(title: "Baby") { Text(babyName).font(.headline) }
 
-                    // Sex + Weight cards
-                    infoCard(title: "Sex") { Text(babySex).font(.headline) }
-
-                    infoCard(title: "Weight") {
-                        Text(String(format: "%.1f kg", babyWeightKg)).font(.headline)
+                    // Name/Age + Weight/Sex as 2-up grid
+                    LazyVGrid(columns: twoCols, spacing: 12) {
+                        infoCard(title: "Name") { Text(babyName).font(.headline) }
+                        infoCard(title: "Age") { Text(ageText).font(.headline) }
+                        infoCard(title: "Weight") { Text(String(format: "%.1f kg", babyWeightKg)).font(.headline) }
+                        infoCard(title: "Sex") { Text(babySex).font(.headline) }
                     }
-                        .font(.system(size: 28, weight: .bold, design: .rounded))
-                        .padding(.top, 10)
 
-                    infoCard(title: "Birthday") { Text(birthday.formatted(date: .abbreviated, time: .omitted)) }
+                    Text("Conditions")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .padding(.top, 6)
 
-                    infoCard(title: "Conditions") {
-                        if conditions.isEmpty {
-                            Text("None").foregroundColor(.secondary)
-                        } else {
-                            Text(conditions.sorted().joined(separator: " • "))
+                    if conditions.isEmpty {
+                        ConditionPill(text: "None", tint: LullisTheme.purple1)
+                    } else {
+                        ForEach(conditions.sorted(), id: \.self) { c in
+                            ConditionPill(text: c, tint: LullisTheme.purple1)
                         }
                     }
 
@@ -1151,19 +1189,51 @@ struct ProfileView: View {
     }
 
     private func infoCard<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(.subheadline).foregroundColor(.secondary)
+        VStack(alignment: .center, spacing: 8) {
+            Text(title)
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+
             content()
+                .multilineTextAlignment(.center)
         }
+        .frame(maxWidth: .infinity, minHeight: 86, alignment: .center) // ✅ centers in the card
         .padding(16)
         .background(LullisTheme.cardFill)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .shadow(color: LullisTheme.shadow, radius: 12, x: 0, y: 6)
     }
+
+
 }
 
-// MARK: - InfoCard (FIXED: message instead of body)
-// This prevents "Invalid redeclaration of 'body'"
+struct ConditionPill: View {
+    let text: String
+    let tint: Color
+
+    var body: some View {
+        HStack {
+            Image(systemName: "checkmark.seal.fill")
+                .foregroundColor(tint)
+            Text(text)
+                .font(.subheadline.weight(.semibold))
+                .foregroundColor(.black.opacity(0.82))
+            Spacer()
+        }
+        .padding(.vertical, 14)
+        .padding(.horizontal, 14)
+        .background(Color.white.opacity(0.86))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(tint.opacity(0.35), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .shadow(color: LullisTheme.shadow, radius: 10, x: 0, y: 6)
+    }
+}
+
+// MARK: - InfoCard (kept)
 
 struct InfoCard: View {
     let icon: String
@@ -1201,7 +1271,6 @@ struct InfoCard: View {
 }
 
 // MARK: - Bluetooth Manager (Prototype)
-//
 // Expected strings from Arduino later:
 // "TEMP:36.9,HR:132,SPO2:98,BPSYS:72,BPDIA:44"
 
@@ -1214,6 +1283,72 @@ final class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelega
     @Published var spo2: Double = 98
     @Published var bpSys: Double = 72
     @Published var bpDia: Double = 44
+
+    enum DemoAction {
+        case rollover
+        case hypoxia
+        case fever
+        case heartbeatTick(Int)
+    }
+
+    // Demo reversion (7 seconds)
+    private struct VitalsSnapshot {
+        let temperature: Double
+        let heartRate: Double
+        let spo2: Double
+        let bpSys: Double
+        let bpDia: Double
+    }
+    private var demoSnapshot: VitalsSnapshot?
+    private var demoRevertTask: Task<Void, Never>?
+
+    private func beginOrRefreshDemoWindow() {
+        if demoSnapshot == nil {
+            demoSnapshot = VitalsSnapshot(
+                temperature: temperature,
+                heartRate: heartRate,
+                spo2: spo2,
+                bpSys: bpSys,
+                bpDia: bpDia
+            )
+        }
+
+        demoRevertTask?.cancel()
+        demoRevertTask = Task { [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(nanoseconds: 7_000_000_000)
+
+            guard !self.isConnected else {
+                self.demoSnapshot = nil
+                return
+            }
+
+            if let snap = self.demoSnapshot {
+                self.temperature = snap.temperature
+                self.heartRate = snap.heartRate
+                self.spo2 = snap.spo2
+                self.bpSys = snap.bpSys
+                self.bpDia = snap.bpDia
+            }
+            self.demoSnapshot = nil
+        }
+    }
+
+    func applyDemo(_ action: DemoAction) {
+        guard !isConnected else { return }
+        beginOrRefreshDemoWindow()
+
+        switch action {
+        case .rollover:
+            heartRate = max(80, heartRate - 8)
+        case .hypoxia:
+            spo2 = max(80, spo2 - 5)
+        case .fever:
+            temperature = min(40.0, temperature + 0.4)
+        case .heartbeatTick(let tick):
+            temperature = 36.6 + (Double((tick % 6)) * 0.05)
+        }
+    }
 
     private var centralManager: CBCentralManager!
     private var peripheral: CBPeripheral?
@@ -1248,6 +1383,11 @@ final class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelega
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        // cancel demo revert + clear snapshot when a real device connects
+        demoRevertTask?.cancel()
+        demoRevertTask = nil
+        demoSnapshot = nil
+
         isConnected = true
         peripheral.delegate = self
         peripheral.discoverServices(nil)
@@ -1311,3 +1451,4 @@ final class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelega
         }
     }
 }
+
