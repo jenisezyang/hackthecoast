@@ -928,7 +928,6 @@ struct DangerCard: View {
 struct VitalDetailSheet: View {
     let title: String
     let currentValue: String
-    let refreshValue: Double   // numeric reading used for AI refresh logic
 
     let primaryLabel: String
     let primaryRange: VitalRange
@@ -940,14 +939,16 @@ struct VitalDetailSheet: View {
     let ageBracket: AgeBracket
     let conditions: Set<String>
 
-    // ✅ pass these in
     let sex: String
     let weightKg: Double
 
-    // AI state
+    // ✅ add this ONCE and keep it near the bottom
+    let refreshValue: Double
+
     @State private var aiText: String = ""
     @State private var aiLoading: Bool = false
     @State private var aiError: String?
+
     @State private var lastAIValue: Double?
     @State private var lastAIStatus: String?
 
@@ -1006,13 +1007,36 @@ struct VitalDetailSheet: View {
                 .padding(.horizontal, 16)
                 .padding(.bottom, 24)
             }
+            
+            .onChange(of: refreshValue) { _, newVal in
+                guard let old = lastAIValue, old != 0 else {
+                    lastAIValue = newVal
+                    return
+                }
+
+                let pct = abs((newVal - old) / old) * 100.0
+                if pct >= 2.0 {
+                    Task { await loadAI(force: true) }
+                    lastAIValue = newVal
+                }
+            }
+            .onChange(of: statusLabel) { _, newStatus in
+                if let last = lastAIStatus, last != newStatus {
+                    Task { await loadAI(force: true) }
+                }
+                lastAIStatus = newStatus
+            }
         }
         .scrollIndicators(.visible)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
 
         // ✅ call once when sheet opens
-        .task { await loadAI() }
+        .task {
+            lastAIValue = refreshValue
+            lastAIStatus = statusLabel
+            await loadAIIfNeeded()
+        }
 
         // ✅ call again when these change (re-opens or different vitals)
         .onChange(of: title) { _, _ in Task { await loadAI() } }
