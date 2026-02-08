@@ -3,6 +3,17 @@ import CoreBluetooth
 import Combine
 import UIKit
 
+// MARK: - Theme
+
+enum LullisTheme {
+    static let primary = Color(red: 0.33, green: 0.29, blue: 0.95)     // purple-ish
+    static let bgTop   = Color(red: 0.95, green: 0.97, blue: 1.00)
+    static let bgBot   = Color(red: 1.00, green: 0.97, blue: 0.98)
+
+    static let cardFill = Color.white.opacity(0.86)
+    static let shadow = Color.black.opacity(0.08)
+}
+
 // MARK: - Backend Models
 
 enum AgeBracket: String, CaseIterable, Identifiable {
@@ -15,7 +26,6 @@ enum AgeBracket: String, CaseIterable, Identifiable {
     case month6 = "6 months"
     case month9 = "9 months"
     case year1  = "1 year"
-
     var id: String { rawValue }
 }
 
@@ -107,7 +117,6 @@ enum BabyCondition: String, CaseIterable, Identifiable {
     case infectionRisk = "Infection risk"
     case apnea = "Apnea episodes"
     case seizures = "Seizure disorder"
-
     var id: String { rawValue }
 }
 
@@ -204,18 +213,17 @@ struct SetupView: View {
 
     var body: some View {
         ZStack {
-            LinearGradient(
-                colors: [Color(red: 0.92, green: 0.96, blue: 1.0), Color(red: 1.0, green: 0.94, blue: 0.96)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+            LinearGradient(colors: [LullisTheme.bgTop, LullisTheme.bgBot],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
             .ignoresSafeArea()
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
+
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Lullis")
                             .font(.system(size: 36, weight: .bold, design: .rounded))
+                            .foregroundColor(.black.opacity(0.88))
                         Text("Set up your baby’s profile")
                             .foregroundColor(.secondary)
                     }
@@ -229,14 +237,9 @@ struct SetupView: View {
                             }
 
                             labeled("Birthday") {
-                                DatePicker(
-                                    "",
-                                    selection: $birthday,
-                                    in: ...Date(),
-                                    displayedComponents: [.date]
-                                )
-                                .datePickerStyle(.compact)
-                                .labelsHidden()
+                                DatePicker("", selection: $birthday, in: ...Date(), displayedComponents: [.date])
+                                    .datePickerStyle(.compact)
+                                    .labelsHidden()
                             }
 
                             HStack {
@@ -302,18 +305,19 @@ struct SetupView: View {
                             .font(.headline)
                             .foregroundColor(.white)
                             .frame(maxWidth: .infinity)
-                            .padding()
-                            .background(babyName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? Color.gray : Color.blue)
-                            .cornerRadius(14)
+                            .padding(.vertical, 16)
+                            .background(babyName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? Color.gray : LullisTheme.primary)
+                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                            .shadow(color: LullisTheme.primary.opacity(0.25), radius: 16, x: 0, y: 10)
                     }
                     .disabled(babyName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    .padding(.top, 6)
+
+                    // no magic .padding(.bottom, 140) here
+                    Spacer(minLength: 10)
                 }
                 .padding(16)
-                .padding(.bottom, 140)
             }
             .scrollIndicators(.visible)
-            .safeAreaInset(edge: .bottom) { Color.clear.frame(height: 20) }
         }
         .onAppear {
             birthday = Date(timeIntervalSince1970: birthdayEpoch)
@@ -328,9 +332,9 @@ struct SetupView: View {
             content()
         }
         .padding(16)
-        .background(Color.white.opacity(0.75))
-        .cornerRadius(18)
-        .shadow(color: Color.black.opacity(0.08), radius: 12, x: 0, y: 6)
+        .background(LullisTheme.cardFill)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .shadow(color: LullisTheme.shadow, radius: 12, x: 0, y: 6)
     }
 
     private func labeled<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
@@ -350,7 +354,7 @@ struct MultipleChoiceRow: View {
         Button(action: onTap) {
             HStack {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .foregroundColor(isSelected ? .blue : .secondary)
+                    .foregroundColor(isSelected ? LullisTheme.primary : .secondary)
                 Text(title).foregroundColor(.primary)
                 Spacer()
             }
@@ -360,7 +364,7 @@ struct MultipleChoiceRow: View {
     }
 }
 
-// MARK: - Dashboard Screen (SCROLLABLE + TAP-TO-DETAIL)
+// MARK: - Dashboard Screen (FIXED LAYOUT: one ScrollView + one VStack + grid)
 
 struct DashboardView: View {
     let babyName: String
@@ -369,6 +373,10 @@ struct DashboardView: View {
 
     @StateObject private var bt: BluetoothManager
     @State private var selectedVital: VitalID?
+
+    // simple demo “live update” so UI changes each second (remove if you don’t want it)
+    @State private var tick: Int = 0
+    private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     init(babyName: String, birthday: Date, conditions: Set<String>) {
         self.babyName = babyName
@@ -387,71 +395,91 @@ struct DashboardView: View {
     private var sysStatus: VitalStatus { base.sysBP.status(for: bt.bpSys) }
     private var diaStatus: VitalStatus { base.diaBP.status(for: bt.bpDia) }
 
-    private var anyDanger: Bool {
-        [tempStatus, hrStatus, spo2Status, sysStatus, diaStatus].contains(.danger)
+    private var overallStatus: VitalStatus {
+        let statuses = [tempStatus, hrStatus, spo2Status, sysStatus, diaStatus]
+        if statuses.contains(.danger) { return .danger }
+        if statuses.contains(.warning) { return .warning }
+        return .normal
     }
+
+    private var anyDanger: Bool { overallStatus == .danger }
+
+    private let columns = [
+        GridItem(.flexible(), spacing: 12),
+        GridItem(.flexible(), spacing: 12)
+    ]
 
     var body: some View {
         ZStack {
-            LinearGradient(
-                colors: [Color(red: 0.90, green: 0.95, blue: 1.0), Color(red: 1.0, green: 0.95, blue: 0.95)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+            LinearGradient(colors: [LullisTheme.bgTop, LullisTheme.bgBot],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
             .ignoresSafeArea()
 
             ScrollView {
-                VStack(spacing: 14) {
-                    header
-                    connectionRow
+                VStack(spacing: 16) {
+                    headerRow
 
-                    VitalCard(
-                        title: "Body Temperature",
-                        value: String(format: "%.1f °C", bt.temperature),
-                        rangeText: base.tempC.label(decimals: 1),
-                        status: tempStatus,
-                        icon: "thermometer"
-                    ) { selectedVital = .temp }
+                    StatusBanner(status: overallStatus)
 
-                    VitalCard(
-                        title: "Heart Rate",
-                        value: "\(Int(bt.heartRate)) bpm",
-                        rangeText: base.heartRateBpm.label(decimals: 0),
-                        status: hrStatus,
-                        icon: "heart.fill"
-                    ) { selectedVital = .hr }
+                    LazyVGrid(columns: columns, spacing: 12) {
+                        VitalTile(
+                            icon: "heart.fill",
+                            iconTint: .red,
+                            title: "Heart Rate",
+                            valueBig: "\(Int(bt.heartRate))",
+                            unit: "BPM",
+                            sparkKind: .red
+                        ) { selectedVital = .hr }
 
-                    VitalCard(
-                        title: "Oxygen Level (SpO₂)",
-                        value: "\(Int(bt.spo2))%",
-                        rangeText: base.spo2.label(decimals: 0),
-                        status: spo2Status,
-                        icon: "waveform.path.ecg"
-                    ) { selectedVital = .spo2 }
+                        VitalTile(
+                            icon: "wind",
+                            iconTint: .blue,
+                            title: "Oxygen (SpO₂)",
+                            valueBig: "\(Int(bt.spo2))",
+                            unit: "%",
+                            sparkKind: .blue
+                        ) { selectedVital = .spo2 }
 
-                    VitalCard(
-                        title: "Blood Pressure",
-                        value: "\(Int(bt.bpSys)) / \(Int(bt.bpDia)) mmHg",
-                        rangeText: "SYS \(base.sysBP.label()) • DIA \(base.diaBP.label())",
-                        status: maxStatus(sysStatus, diaStatus),
-                        icon: "drop.fill"
-                    ) { selectedVital = .bp }
+                        VitalTile(
+                            icon: "thermometer",
+                            iconTint: .orange,
+                            title: "Body Temp",
+                            valueBig: String(format: "%.1f", bt.temperature),
+                            unit: "°C",
+                            sparkKind: .orange
+                        ) { selectedVital = .temp }
+
+                        VitalTile(
+                            icon: "drop.fill",
+                            iconTint: .purple,
+                            title: "Blood Pressure",
+                            valueBig: "\(Int(bt.bpSys))/\(Int(bt.bpDia))",
+                            unit: "mmHg",
+                            sparkKind: .purple
+                        ) { selectedVital = .bp }
+                    }
+
+                    Text("SIMULATE CONDITIONS")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.secondary)
+                        .padding(.top, 4)
+
+                    HStack(spacing: 12) {
+                        SmallActionPill(icon: "arrow.triangle.2.circlepath", label: "Rollover") {
+                            // demo nudge
+                            bt.heartRate = max(80, bt.heartRate - 8)
+                        }
+                        SmallActionPill(icon: "exclamationmark.triangle", label: "Hypoxia") {
+                            bt.spo2 = max(80, bt.spo2 - 5)
+                        }
+                        SmallActionPill(icon: "thermometer.high", label: "Fever") {
+                            bt.temperature = min(40.0, bt.temperature + 0.4)
+                        }
+                    }
 
                     if anyDanger {
-                        Button {
+                        DangerCard {
                             HospitalsView.openHospitalsAppleMaps()
-                        } label: {
-                            HStack {
-                                Image(systemName: "mappin.and.ellipse")
-                                Text("Locate the nearest hospital")
-                            }
-                            .font(.headline)
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding()
-                            .background(Color.red)
-                            .cornerRadius(14)
-                            .padding(.horizontal, 16)
                         }
                     }
 
@@ -462,17 +490,27 @@ struct DashboardView: View {
                             .font(.headline)
                             .foregroundColor(.white)
                             .frame(maxWidth: .infinity)
-                            .padding()
-                            .background(bt.isConnected ? Color.red : Color.blue)
-                            .cornerRadius(14)
-                            .padding(.horizontal, 16)
+                            .padding(.vertical, 16)
+                            .background(bt.isConnected ? Color.red : LullisTheme.primary)
+                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                            .shadow(color: (bt.isConnected ? Color.red : LullisTheme.primary).opacity(0.25), radius: 16, x: 0, y: 10)
                     }
+                    .padding(.top, 6)
+
+                    Spacer(minLength: 12)
                 }
-                .padding(.top, 10)
-                .padding(.bottom, 140)
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .padding(.bottom, 24)
             }
             .scrollIndicators(.visible)
-            .safeAreaInset(edge: .bottom) { Color.clear.frame(height: 20) }
+        }
+        .onReceive(timer) { _ in
+            tick += 1
+            // tiny “alive” movement so it changes each second (optional)
+            if !bt.isConnected {
+                bt.temperature = 36.6 + (Double((tick % 6)) * 0.05)
+            }
         }
         .sheet(item: $selectedVital) { id in
             switch id {
@@ -488,7 +526,6 @@ struct DashboardView: View {
                     ageBracket: bracket,
                     conditions: conditions
                 )
-
             case .hr:
                 VitalDetailSheet(
                     title: "Heart Rate",
@@ -501,7 +538,6 @@ struct DashboardView: View {
                     ageBracket: bracket,
                     conditions: conditions
                 )
-
             case .spo2:
                 VitalDetailSheet(
                     title: "Oxygen Level (SpO₂)",
@@ -514,7 +550,6 @@ struct DashboardView: View {
                     ageBracket: bracket,
                     conditions: conditions
                 )
-
             case .bp:
                 VitalDetailSheet(
                     title: "Blood Pressure",
@@ -537,115 +572,275 @@ struct DashboardView: View {
         return .normal
     }
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                VStack(alignment: .leading) {
-                    Text("Lullis")
-                        .font(.system(size: 28, weight: .bold, design: .rounded))
-                        .foregroundColor(.blue)
-                    Text(babyName).foregroundColor(.secondary)
+    private var headerRow: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(babyName.isEmpty ? "Baby" : babyName)
+                    .font(.system(size: 34, weight: .bold, design: .rounded))
+                    .foregroundColor(.black.opacity(0.88))
+
+                Text("\(ageDays) days old")
+                    .foregroundColor(.secondary)
+
+                if !conditions.isEmpty {
+                    Text(conditions.sorted().first ?? "")
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color.white.opacity(0.75))
+                        .clipShape(Capsule())
                 }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 4) {
-                    Text("Age: \(ageDays) days")
-                        .font(.subheadline.weight(.semibold))
-                    Text(bracket.rawValue)
-                        .font(.caption)
+            }
+
+            Spacer()
+
+            VStack(alignment: .trailing, spacing: 6) {
+                HStack(spacing: 8) {
+                    Text("Learning")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(LullisTheme.primary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(LullisTheme.primary.opacity(0.12))
+                        .clipShape(Capsule())
+
+                    Image(systemName: "gearshape")
                         .foregroundColor(.secondary)
                 }
-                .padding(10)
-                .background(Color.white.opacity(0.7))
-                .cornerRadius(12)
-            }
-
-            HStack(spacing: 10) {
-                chip("Birthday", birthday.formatted(date: .abbreviated, time: .omitted))
-                chip("Conditions", conditions.isEmpty ? "None" : "\(conditions.count)")
-            }
-
-            if !conditions.isEmpty {
-                Text(conditions.sorted().joined(separator: " • "))
+                Text(bracket.rawValue)
                     .font(.caption)
                     .foregroundColor(.secondary)
-                    .padding(.top, 2)
+
+                HStack(spacing: 8) {
+                    Circle().fill(bt.isConnected ? Color.green : Color.red)
+                        .frame(width: 10, height: 10)
+                    Text(bt.isConnected ? "Connected" : "Disconnected")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                .padding(.top, 4)
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 8)
-    }
-
-    private var connectionRow: some View {
-        HStack(spacing: 8) {
-            Circle().fill(bt.isConnected ? Color.green : Color.red)
-                .frame(width: 10, height: 10)
-            Text(bt.isConnected ? "Device Connected" : "Disconnected")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-            Spacer()
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 2)
-    }
-
-    private func chip(_ title: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title).font(.caption).foregroundColor(.secondary)
-            Text(value).font(.subheadline.weight(.semibold))
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(Color.white.opacity(0.7))
-        .cornerRadius(12)
+        .padding(.top, 6)
     }
 }
 
-// MARK: - Tappable Vital Card
+// MARK: - Status Banner
 
-struct VitalCard: View {
-    let title: String
-    let value: String
-    let rangeText: String?
+struct StatusBanner: View {
     let status: VitalStatus
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle().fill(Color.white.opacity(0.85))
+                    .frame(width: 44, height: 44)
+                Image(systemName: "waveform.path.ecg")
+                    .foregroundColor(tint)
+                    .font(.system(size: 18, weight: .bold))
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(titleText)
+                    .font(.headline)
+                    .foregroundColor(tint)
+                Text(subText)
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+            }
+
+            Spacer()
+        }
+        .padding(14)
+        .background(tint.opacity(0.12))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .shadow(color: LullisTheme.shadow, radius: 10, x: 0, y: 6)
+    }
+
+    private var tint: Color {
+        switch status {
+        case .normal: return .green
+        case .warning: return .orange
+        case .danger: return .red
+        }
+    }
+
+    private var titleText: String {
+        switch status {
+        case .normal: return "Vitals Normal"
+        case .warning: return "Vitals Warning"
+        case .danger: return "Potential Emergency"
+        }
+    }
+
+    private var subText: String {
+        switch status {
+        case .normal: return "Readings are within typical ranges."
+        case .warning: return "Near the edge of typical ranges."
+        case .danger: return "Immediate attention may be needed."
+        }
+    }
+}
+
+// MARK: - Vital Tile (Grid card)
+
+enum SparkKind { case red, blue, orange, purple }
+
+struct VitalTile: View {
     let icon: String
+    let iconTint: Color
+    let title: String
+    let valueBig: String
+    let unit: String
+    let sparkKind: SparkKind
     let onTap: () -> Void
 
     var body: some View {
         Button(action: onTap) {
-            HStack(spacing: 12) {
-                ZStack {
-                    Circle()
-                        .fill(status.color.opacity(0.20))
-                        .frame(width: 52, height: 52)
-                    Image(systemName: icon)
-                        .font(.system(size: 22, weight: .semibold))
-                        .foregroundColor(status.color)
-                }
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title).font(.subheadline).foregroundColor(.secondary)
-                    Text(value).font(.system(size: 26, weight: .bold, design: .rounded))
-                    if let rangeText {
-                        Text("Typical: \(rangeText)")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    ZStack {
+                        Circle().fill(iconTint.opacity(0.12))
+                            .frame(width: 40, height: 40)
+                        Image(systemName: icon)
+                            .foregroundColor(iconTint)
+                            .font(.system(size: 18, weight: .bold))
                     }
+                    Spacer()
                 }
 
-                Spacer()
-
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 14, weight: .semibold))
+                Text(title)
                     .foregroundColor(.secondary)
-                    .padding(.trailing, 2)
+                    .font(.subheadline.weight(.semibold))
+
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(valueBig)
+                        .font(.system(size: 40, weight: .bold, design: .rounded))
+                        .foregroundColor(.black.opacity(0.88))
+                        .minimumScaleFactor(0.75)
+                        .lineLimit(1)
+                    Text(unit)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(.secondary)
+                }
+
+                SparkLine(kind: sparkKind)
+                    .frame(height: 22)
+                    .opacity(0.35)
             }
             .padding(16)
-            .background(Color.white.opacity(0.75))
-            .cornerRadius(18)
-            .shadow(color: Color.black.opacity(0.08), radius: 12, x: 0, y: 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(LullisTheme.cardFill)
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .shadow(color: LullisTheme.shadow, radius: 12, x: 0, y: 6)
         }
         .buttonStyle(.plain)
-        .padding(.horizontal, 16)
+    }
+}
+
+struct SparkLine: View {
+    let kind: SparkKind
+
+    var body: some View {
+        GeometryReader { geo in
+            let w = geo.size.width
+            let h = geo.size.height
+
+            Path { p in
+                // simple “spark” shape (static, but looks like a mini chart)
+                p.move(to: CGPoint(x: 0, y: h * 0.70))
+                p.addCurve(to: CGPoint(x: w * 0.25, y: h * 0.45),
+                           control1: CGPoint(x: w * 0.10, y: h * 0.85),
+                           control2: CGPoint(x: w * 0.15, y: h * 0.20))
+                p.addCurve(to: CGPoint(x: w * 0.55, y: h * 0.80),
+                           control1: CGPoint(x: w * 0.35, y: h * 0.75),
+                           control2: CGPoint(x: w * 0.45, y: h * 1.05))
+                p.addCurve(to: CGPoint(x: w * 0.85, y: h * 0.35),
+                           control1: CGPoint(x: w * 0.65, y: h * 0.60),
+                           control2: CGPoint(x: w * 0.75, y: h * 0.05))
+                p.addLine(to: CGPoint(x: w, y: h * 0.55))
+            }
+            .stroke(color, lineWidth: 3)
+        }
+    }
+
+    private var color: Color {
+        switch kind {
+        case .red: return .red
+        case .blue: return .blue
+        case .orange: return .orange
+        case .purple: return .purple
+        }
+    }
+}
+
+// MARK: - Small Action Pills
+
+struct SmallActionPill: View {
+    let icon: String
+    let label: String
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            VStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(.system(size: 18, weight: .bold))
+                Text(label)
+                    .font(.subheadline.weight(.semibold))
+            }
+            .foregroundColor(.black.opacity(0.82))
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            .background(Color.white.opacity(0.85))
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .shadow(color: LullisTheme.shadow, radius: 10, x: 0, y: 6)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Danger Card
+
+struct DangerCard: View {
+    let onLocate: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 12) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundColor(.white)
+                    .font(.system(size: 20, weight: .bold))
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Potential Emergency")
+                        .foregroundColor(.white)
+                        .font(.headline)
+                    Text("Vitals indicate immediate attention is needed.")
+                        .foregroundColor(.white.opacity(0.9))
+                        .font(.subheadline)
+                }
+                Spacer()
+            }
+
+            Button(action: onLocate) {
+                HStack {
+                    Image(systemName: "mappin.and.ellipse")
+                    Text("Locate Nearest Hospital")
+                        .font(.headline)
+                    Spacer()
+                }
+                .foregroundColor(.red)
+                .padding(.vertical, 14)
+                .padding(.horizontal, 16)
+                .background(Color.white)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            }
+        }
+        .padding(16)
+        .background(Color.red.opacity(0.92))
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .shadow(color: Color.red.opacity(0.22), radius: 18, x: 0, y: 10)
     }
 }
 
@@ -669,7 +864,7 @@ struct VitalDetailSheet: View {
         ScrollView {
             VStack(spacing: 18) {
 
-                // FIXED HEADER AREA (keeps consistent top spacing while dragging)
+                // fixed header spacing while dragging sheet
                 VStack(spacing: 12) {
                     Text(title)
                         .font(.system(size: 28, weight: .bold, design: .rounded))
@@ -682,12 +877,10 @@ struct VitalDetailSheet: View {
                     Text("Comparison group: \(ageBracket.rawValue)")
                         .foregroundColor(.secondary)
                 }
-                .padding(.top, 24) // constant top spacing
+                .padding(.top, 24)
                 .padding(.horizontal, 16)
                 .frame(maxWidth: .infinity)
-                .fixedSize(horizontal: false, vertical: true)
 
-                // CONTENT
                 VStack(spacing: 12) {
                     VStack(alignment: .leading, spacing: 8) {
                         Text(primaryLabel).font(.headline)
@@ -696,7 +889,7 @@ struct VitalDetailSheet: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding()
-                    .background(Color.white.opacity(0.75))
+                    .background(Color.white.opacity(0.85))
                     .cornerRadius(14)
 
                     if let secondaryLabel, let secondaryRange {
@@ -707,7 +900,7 @@ struct VitalDetailSheet: View {
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding()
-                        .background(Color.white.opacity(0.75))
+                        .background(Color.white.opacity(0.85))
                         .cornerRadius(14)
                     }
 
@@ -735,6 +928,11 @@ struct VitalDetailSheet: View {
                         .background(Color.gray.opacity(0.10))
                         .cornerRadius(14)
                     }
+
+                    Text("Note: This is informational and not a diagnosis.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .padding(.top, 4)
                 }
                 .padding(.horizontal, 16)
                 .padding(.bottom, 24)
@@ -757,16 +955,13 @@ struct VitalDetailSheet: View {
     }
 }
 
-// MARK: - Hospitals Tab (always accessible)
+// MARK: - Hospitals Tab
 
 struct HospitalsView: View {
     var body: some View {
         ZStack {
-            LinearGradient(
-                colors: [Color(red: 0.92, green: 0.96, blue: 1.0), Color(red: 1.0, green: 0.94, blue: 0.96)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+            LinearGradient(colors: [LullisTheme.bgTop, LullisTheme.bgBot],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
             .ignoresSafeArea()
 
             ScrollView {
@@ -788,9 +983,9 @@ struct HospitalsView: View {
                         .font(.headline)
                         .foregroundColor(.white)
                         .frame(maxWidth: .infinity)
-                        .padding()
+                        .padding(.vertical, 16)
                         .background(Color.red)
-                        .cornerRadius(14)
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                     }
 
                     Button {
@@ -803,18 +998,16 @@ struct HospitalsView: View {
                         .font(.headline)
                         .foregroundColor(.white)
                         .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Color.blue)
-                        .cornerRadius(14)
+                        .padding(.vertical, 16)
+                        .background(LullisTheme.primary)
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                     }
 
                     Spacer(minLength: 10)
                 }
                 .padding(16)
-                .padding(.bottom, 140)
             }
             .scrollIndicators(.visible)
-            .safeAreaInset(edge: .bottom) { Color.clear.frame(height: 20) }
         }
     }
 
@@ -831,7 +1024,7 @@ struct HospitalsView: View {
     }
 }
 
-// MARK: - Profile Tab
+// MARK: - Profile Tab (dev reset kept here only)
 
 struct ProfileView: View {
     let babyName: String
@@ -840,11 +1033,8 @@ struct ProfileView: View {
 
     var body: some View {
         ZStack {
-            LinearGradient(
-                colors: [Color(red: 0.90, green: 0.95, blue: 1.0), Color(red: 1.0, green: 0.95, blue: 0.95)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+            LinearGradient(colors: [LullisTheme.bgTop, LullisTheme.bgBot],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
             .ignoresSafeArea()
 
             ScrollView {
@@ -868,20 +1058,19 @@ struct ProfileView: View {
                         UserDefaults.standard.set(false, forKey: "hasCompletedSetup")
                     } label: {
                         Text("Reset Setup (dev)")
-                            .font(.subheadline)
+                            .font(.subheadline.weight(.semibold))
                             .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
                     }
-                    .padding()
-                    .background(Color.white.opacity(0.75))
-                    .cornerRadius(14)
+                    .background(Color.white.opacity(0.85))
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .shadow(color: LullisTheme.shadow, radius: 12, x: 0, y: 6)
 
                     Spacer(minLength: 10)
                 }
                 .padding(16)
-                .padding(.bottom, 140)
             }
             .scrollIndicators(.visible)
-            .safeAreaInset(edge: .bottom) { Color.clear.frame(height: 20) }
         }
     }
 
@@ -891,9 +1080,47 @@ struct ProfileView: View {
             content()
         }
         .padding(16)
-        .background(Color.white.opacity(0.75))
-        .cornerRadius(18)
-        .shadow(color: Color.black.opacity(0.08), radius: 12, x: 0, y: 6)
+        .background(LullisTheme.cardFill)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .shadow(color: LullisTheme.shadow, radius: 12, x: 0, y: 6)
+    }
+}
+
+// MARK: - InfoCard (FIXED: message instead of body)
+// This prevents "Invalid redeclaration of 'body'"
+
+struct InfoCard: View {
+    let icon: String
+    let title: String
+    let message: String
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 18, style: .continuous)
+            .fill(Color(red: 0.93, green: 0.95, blue: 1.0).opacity(0.9))
+            .overlay(
+                HStack(alignment: .top, spacing: 12) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(Color.white.opacity(0.9))
+                            .frame(width: 44, height: 44)
+                        Image(systemName: icon)
+                            .foregroundColor(LullisTheme.primary)
+                            .font(.system(size: 18, weight: .bold))
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(title)
+                            .font(.headline)
+                            .foregroundColor(.black.opacity(0.85))
+                        Text(message)
+                            .foregroundColor(LullisTheme.primary.opacity(0.85))
+                            .font(.subheadline)
+                    }
+
+                    Spacer()
+                }
+                .padding(14)
+            )
     }
 }
 
@@ -1008,4 +1235,3 @@ final class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelega
         }
     }
 }
-
