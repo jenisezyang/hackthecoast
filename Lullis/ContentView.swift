@@ -29,6 +29,12 @@ enum AgeBracket: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+enum Sex: String, CaseIterable, Identifiable {
+    case male = "Male"
+    case female = "Female"
+    var id: String { rawValue }
+}
+
 enum VitalStatus: Equatable {
     case normal, warning, danger
 
@@ -156,6 +162,8 @@ struct ContentView: View {
     @AppStorage("babyName") private var babyName = ""
     @AppStorage("birthdayEpoch") private var birthdayEpoch: Double = Date().timeIntervalSince1970
     @AppStorage("conditionsCSV") private var conditionsCSV = ""
+    @AppStorage("babySex") private var babySex: String = Sex.male.rawValue
+    @AppStorage("babyWeightKg") private var babyWeightKg: Double = 3.5
 
     private var birthday: Date { Date(timeIntervalSince1970: birthdayEpoch) }
     private var conditionStrings: Set<String> {
@@ -208,6 +216,12 @@ struct SetupView: View {
     @State private var birthday: Date = Date()
     @State private var selected = Set<BabyCondition>()
     @State private var showConditions = false
+    
+    @AppStorage("babySex") private var babySex: String = Sex.male.rawValue
+    @AppStorage("babyWeightKg") private var babyWeightKg: Double = 3.5
+
+    @State private var weightText: String = "3.5"
+    @State private var selectedSex: Sex = .male
 
     private var ageBracket: AgeBracket { bracketFromBirthday(birthday) }
 
@@ -240,6 +254,26 @@ struct SetupView: View {
                                 DatePicker("", selection: $birthday, in: ...Date(), displayedComponents: [.date])
                                     .datePickerStyle(.compact)
                                     .labelsHidden()
+                            }
+                            
+                            labeled("Sex") {
+                                Picker("", selection: $selectedSex) {
+                                    ForEach(Sex.allCases) { s in
+                                        Text(s.rawValue).tag(s)
+                                    }
+                                }
+                                .pickerStyle(.segmented)
+                            }
+
+                            labeled("Weight (kg)") {
+                                TextField("e.g., 3.5", text: $weightText)
+                                    .keyboardType(.decimalPad)
+                                    .textFieldStyle(.roundedBorder)
+                                    .onChange(of: weightText) { _, newValue in
+                                        // keep it numeric-ish; don't crash if empty
+                                        let cleaned = newValue.replacingOccurrences(of: ",", with: ".")
+                                        if let v = Double(cleaned) { babyWeightKg = v }
+                                    }
                             }
 
                             HStack {
@@ -299,6 +333,10 @@ struct SetupView: View {
                     Button {
                         birthdayEpoch = birthday.timeIntervalSince1970
                         conditionsCSV = selected.map { $0.rawValue }.sorted().joined(separator: ",")
+                        babySex = selectedSex.rawValue
+                        let cleaned = weightText.replacingOccurrences(of: ",", with: ".")
+                        babyWeightKg = Double(cleaned) ?? babyWeightKg
+
                         hasCompletedSetup = true
                     } label: {
                         Text("Continue")
@@ -323,6 +361,8 @@ struct SetupView: View {
             birthday = Date(timeIntervalSince1970: birthdayEpoch)
             let set = Set(conditionsCSV.split(separator: ",").map { String($0) })
             selected = Set(BabyCondition.allCases.filter { set.contains($0.rawValue) })
+            selectedSex = Sex(rawValue: babySex) ?? .male
+            weightText = String(format: "%.1f", babyWeightKg)
         }
     }
 
@@ -1024,12 +1064,22 @@ struct HospitalsView: View {
     }
 }
 
+func avatarAssetName(for sexRaw: String) -> String {
+    let sex = Sex(rawValue: sexRaw) ?? .male
+    switch sex {
+    case .male: return "avatar_male"
+    case .female: return "avatar_female"
+    }
+}
+
 // MARK: - Profile Tab (dev reset kept here only)
 
 struct ProfileView: View {
     let babyName: String
     let birthday: Date
     let conditions: Set<String>
+    @AppStorage("babySex") private var babySex: String = Sex.male.rawValue
+    @AppStorage("babyWeightKg") private var babyWeightKg: Double = 3.5
 
     var body: some View {
         ZStack {
@@ -1040,6 +1090,31 @@ struct ProfileView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     Text("Profile")
+                    // Avatar card
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Avatar")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+
+                        Image(avatarAssetName(for: babySex))
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 120, height: 120)
+                            .clipShape(Circle())
+                            .overlay(Circle().stroke(Color.white.opacity(0.9), lineWidth: 4))
+                            .shadow(color: Color.black.opacity(0.10), radius: 10, x: 0, y: 6)
+                    }
+                    .padding(16)
+                    .background(LullisTheme.cardFill)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .shadow(color: LullisTheme.shadow, radius: 12, x: 0, y: 6)
+
+                    // Sex + Weight cards
+                    infoCard(title: "Sex") { Text(babySex).font(.headline) }
+
+                    infoCard(title: "Weight") {
+                        Text(String(format: "%.1f kg", babyWeightKg)).font(.headline)
+                    }
                         .font(.system(size: 28, weight: .bold, design: .rounded))
                         .padding(.top, 10)
 
