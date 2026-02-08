@@ -4,8 +4,6 @@ import UIKit
 
 // MARK: - Theme
 
-private let gemini = GeminiService(apiKey: "AIzaSyBoz2Pg3xDHhy5ajAmf9Nv6Xv-mwdbeY2g")
-
 
 enum LullisTheme {
     static let primary = Color(red: 0.33, green: 0.29, blue: 0.95)     // purple-ish
