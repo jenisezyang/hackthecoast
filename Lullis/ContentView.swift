@@ -910,6 +910,12 @@ struct DangerCard: View {
 
 // MARK: - Vital Detail Sheet
 
+// VitalDetailSheet (drop-in replacement)
+// Put this in ContentView.swift replacing your existing VitalDetailSheet.
+// Requires: import SwiftUI, import Combine, import UIKit (Combine only needed elsewhere; fine to keep)
+
+import SwiftUI
+
 struct VitalDetailSheet: View {
     let title: String
     let currentValue: String
@@ -924,9 +930,22 @@ struct VitalDetailSheet: View {
     let ageBracket: AgeBracket
     let conditions: Set<String>
 
+    // ✅ pass these in from DashboardView/Profile storage
+    let sex: String
+    let weightKg: Double
+
+    // AI state
+    @State private var aiText: String = ""
+    @State private var aiLoading: Bool = false
+    @State private var aiError: String?
+
+    // cache per vital so it doesn’t spam requests when sheet reopens quickly
+    @State private var lastPromptHash: Int?
+
     var body: some View {
         ScrollView {
             VStack(spacing: 18) {
+
                 VStack(spacing: 12) {
                     Text(title)
                         .font(.system(size: 28, weight: .bold, design: .rounded))
@@ -944,37 +963,16 @@ struct VitalDetailSheet: View {
                 .frame(maxWidth: .infinity)
 
                 VStack(spacing: 12) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(primaryLabel).font(.headline)
-                        Text(primaryRange.label(decimals: title == "Body Temperature" ? 1 : 0))
-                            .font(.title3.weight(.semibold))
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding()
-                    .background(Color.white.opacity(0.85))
-                    .cornerRadius(14)
+                    rangeCard(label: primaryLabel,
+                              value: primaryRange.label(decimals: title == "Body Temperature" ? 1 : 0))
 
                     if let secondaryLabel, let secondaryRange {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(secondaryLabel).font(.headline)
-                            Text(secondaryRange.label(decimals: 0))
-                                .font(.title3.weight(.semibold))
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding()
-                        .background(Color.white.opacity(0.85))
-                        .cornerRadius(14)
+                        rangeCard(label: secondaryLabel,
+                                  value: secondaryRange.label(decimals: 0))
                     }
 
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("What this means").font(.headline)
-                        Text(explanationText)
-                            .foregroundColor(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding()
-                    .background(status.color.opacity(0.12))
-                    .cornerRadius(14)
+                    // ✅ AI Personalized explanation block (this is the new part)
+                    aiCard
 
                     if !conditions.isEmpty {
                         VStack(alignment: .leading, spacing: 8) {
@@ -1003,17 +1001,115 @@ struct VitalDetailSheet: View {
         .scrollIndicators(.visible)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
+        .task {
+            await loadAIIfNeeded()
+        }
     }
 
-    private var explanationText: String {
-        switch status {
-        case .normal:
-            return "This reading is within the typical range for babies of a similar age group."
-        case .warning:
-            return "This reading is near the edge of the typical range. Continue monitoring and watch for trends."
-        case .danger:
-            return "This reading is outside the typical range. Consider seeking medical advice."
+    // MARK: - AI UI
+
+    private var aiCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Personalized explanation")
+                    .font(.headline)
+                Spacer()
+                if aiLoading {
+                    ProgressView().scaleEffect(0.9)
+                }
+            }
+
+            if let aiError {
+                Text(aiError)
+                    .foregroundColor(.secondary)
+                    .font(.subheadline)
+
+                Button("Try again") {
+                    Task { await loadAI(force: true) }
+                }
+                .font(.subheadline.weight(.semibold))
+            } else if !aiText.isEmpty {
+                Text(aiText)
+                    .foregroundColor(.secondary)
+                    .font(.subheadline)
+            } else {
+                Text("Generating a brief explanation…")
+                    .foregroundColor(.secondary)
+                    .font(.subheadline)
+            }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding()
+        .background(status.color.opacity(0.12))
+        .cornerRadius(14)
+    }
+
+    // MARK: - Helpers
+
+    private func rangeCard(label: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(label).font(.headline)
+            Text(value)
+                .font(.title3.weight(.semibold))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding()
+        .background(Color.white.opacity(0.85))
+        .cornerRadius(14)
+    }
+
+    // MARK: - AI Prompt + Load
+
+    private func makePrompt() -> String {
+        let conditionText = conditions.isEmpty ? "None" : conditions.sorted().joined(separator: ", ")
+
+        return """
+        You are a calm pediatric vitals explainer. Write 2–4 short sentences. No diagnosis. Avoid alarmist language.
+
+        Explain what the reading means compared to typical ranges for the baby's age group.
+        Mention the selected conditions only if it changes how cautiously to interpret or monitor.
+
+        Vital: \(title)
+        Reading: \(currentValue)
+        Status: \(statusLabel)
+        Age group: \(ageBracket.rawValue)
+        Sex: \(sex)
+        Weight: \(String(format: "%.1f", weightKg)) kg
+        Conditions: \(conditionText)
+        """
+    }
+
+    private var statusLabel: String {
+        switch status {
+        case .normal: return "normal"
+        case .warning: return "warning"
+        case .danger: return "danger"
+        }
+    }
+
+    private func loadAIIfNeeded() async {
+        await loadAI(force: false)
+    }
+
+    private func loadAI(force: Bool) async {
+        let prompt = makePrompt()
+        let hash = prompt.hashValue
+
+        if !force, lastPromptHash == hash, !aiText.isEmpty { return }
+        lastPromptHash = hash
+
+        aiLoading = true
+        aiError = nil
+
+        do {
+            let text = try await GeminiService.shared.generate(prompt: prompt)
+            aiText = text
+        } catch {
+            aiError = "Could not generate explanation."
+            aiText = ""
+        }
+
+        aiLoading = false
     }
 }
 

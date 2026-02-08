@@ -1,36 +1,63 @@
 import Foundation
 
-struct GeminiService {
-    let apiKey: String
+final class GeminiService {
+    static let shared = GeminiService()
+    private init() {}
 
-    func generateMessage(prompt: String) async throws -> String {
-        // Model name can change; this is a common one.
-        let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent")!
+    // Replace this with however you already store your API key
+    // (env var, plist, build setting, etc.)
+    private var apiKey: String {
+        // Example placeholder — you said you already did this part.
+        return AIzaSyBoz2Pg3xDHhy5ajAmf9Nv6Xv-mwdbeY2g
+    }
 
-        var req = URLRequest(url: url)
-        req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
+    // Gemini REST endpoint (Generative Language API)
+    // If you're using a different endpoint already, keep yours.
+    private let endpointBase =
+    "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key="
+
+    enum GeminiError: Error {
+        case badURL
+        case badResponse
+        case noText
+    }
+
+    /// Returns the model’s text response.
+    func generate(prompt: String) async throws -> String {
+        guard let url = URL(string: endpointBase + apiKey) else { throw GeminiError.badURL }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
         let body: [String: Any] = [
             "contents": [
-                ["parts": [["text": prompt]]]
+                [
+                    "parts": [
+                        ["text": prompt]
+                    ]
+                ]
             ]
         ]
-        req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let (data, response) = try await URLSession.shared.data(for: req)
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
-            let msg = String(data: data, encoding: .utf8) ?? "Request failed"
-            throw NSError(domain: "Gemini", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: msg])
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            throw GeminiError.badResponse
         }
 
-        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        let candidates = json?["candidates"] as? [[String: Any]]
+        // Parse: candidates[0].content.parts[0].text
+        let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let candidates = obj?["candidates"] as? [[String: Any]]
         let content = candidates?.first?["content"] as? [String: Any]
         let parts = content?["parts"] as? [[String: Any]]
-        let text = parts?.compactMap { $0["text"] as? String }.joined() ?? ""
+        let text = parts?.first?["text"] as? String
+
+        guard let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw GeminiError.noText
+        }
 
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
