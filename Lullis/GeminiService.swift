@@ -1,27 +1,31 @@
 import Foundation
 
+enum GeminiError: Error {
+    case invalidURL
+    case invalidResponse
+    case apiError(String)
+}
+
+@MainActor
 final class GeminiService {
     static let shared = GeminiService()
+
+    // 🔴 PUT YOUR API KEY HERE
+    private let apiKey = "PASTE_YOUR_API_KEY_HERE"
+
     private init() {}
 
-    // ✅ API key lives HERE
-    private let apiKey = "AIzaSyBo2zPg3xDHhy5ajAmf9Nv6Xv-mwdbey2g"
-
-    private var endpointURL: URL {
-        URL(string:
-          "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=\(apiKey)"
-        )!
-    }
-
-    enum GeminiError: Error {
-        case badResponse
-        case noText
-    }
-
     func generate(prompt: String) async throws -> String {
-        var request = URLRequest(url: endpointURL)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        guard !apiKey.isEmpty else {
+            throw GeminiError.apiError("Missing API key")
+        }
+
+        let urlString =
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=\(apiKey)"
+
+        guard let url = URL(string: urlString) else {
+            throw GeminiError.invalidURL
+        }
 
         let body: [String: Any] = [
             "contents": [
@@ -33,9 +37,19 @@ final class GeminiService {
             ]
         ]
 
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let jsonData = try JSONSerialization.data(withJSONObject: body)
 
-        let (data, _) = try await URLSession.shared.data(for: request)
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.httpBody = jsonData
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            let raw = String(data: data, encoding: .utf8) ?? "Unknown error"
+            throw GeminiError.apiError(raw)
+        }
 
         let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
         let candidates = json?["candidates"] as? [[String: Any]]
@@ -43,8 +57,10 @@ final class GeminiService {
         let parts = content?["parts"] as? [[String: Any]]
         let text = parts?.first?["text"] as? String
 
-        guard let text else { throw GeminiError.noText }
+        guard let text else {
+            throw GeminiError.invalidResponse
+        }
+
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
-
