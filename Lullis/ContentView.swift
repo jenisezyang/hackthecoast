@@ -1108,6 +1108,8 @@ struct ProfileView: View {
                     .background(LullisTheme.cardFill)
                     .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                     .shadow(color: LullisTheme.shadow, radius: 12, x: 0, y: 6)
+                    
+                    infoCard(title: "Baby") { Text(babyName).font(.headline) }
 
                     // Sex + Weight cards
                     infoCard(title: "Sex") { Text(babySex).font(.headline) }
@@ -1118,7 +1120,6 @@ struct ProfileView: View {
                         .font(.system(size: 28, weight: .bold, design: .rounded))
                         .padding(.top, 10)
 
-                    infoCard(title: "Baby") { Text(babyName).font(.headline) }
                     infoCard(title: "Birthday") { Text(birthday.formatted(date: .abbreviated, time: .omitted)) }
 
                     infoCard(title: "Conditions") {
