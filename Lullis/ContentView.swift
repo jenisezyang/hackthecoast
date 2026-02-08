@@ -4,14 +4,18 @@ import UIKit
 
 // MARK: - Theme
 
+private let gemini = GeminiService(apiKey: "AIzaSyBoz2Pg3xDHhy5ajAmf9Nv6Xv-mwdbeY2g")
+
+
 enum LullisTheme {
-    static let primary = Color(red: 0.33, green: 0.29, blue: 0.95)
+    static let primary = Color(red: 0.33, green: 0.29, blue: 0.95)     // purple-ish
     static let bgTop   = Color(red: 0.95, green: 0.97, blue: 1.00)
     static let bgBot   = Color(red: 1.00, green: 0.97, blue: 0.98)
 
     static let cardFill = Color.white.opacity(0.86)
     static let shadow = Color.black.opacity(0.08)
 
+    // #CCCCFF + a few slightly darker shades (same hue family)
     static let purple1 = Color(red: 204/255, green: 204/255, blue: 255/255) // #CCCCFF
     static let purple2 = Color(red: 184/255, green: 184/255, blue: 255/255)
     static let purple3 = Color(red: 163/255, green: 163/255, blue: 255/255)
@@ -45,7 +49,7 @@ enum VitalStatus: Equatable {
     var color: Color {
         switch self {
         case .normal: return .green
-        case .warning: return .yellow
+        case .warning: return .orange
         case .danger: return .red
         }
     }
@@ -55,6 +59,7 @@ struct VitalRange {
     let low: Double
     let high: Double
 
+    // Danger if out of range; Warning if within 10% of edges
     func status(for value: Double) -> VitalStatus {
         if value < low || value > high { return .danger }
         let width = max(0.0001, high - low)
@@ -156,6 +161,59 @@ private func bracketFromBirthday(_ birthday: Date) -> AgeBracket {
 enum VitalID: String, Identifiable {
     case temp, hr, spo2, bp
     var id: String { rawValue }
+}
+
+// MARK: - Demo Vitals Store (NO BLUETOOTH)
+
+@MainActor
+final class DemoVitalsStore: ObservableObject {
+    @Published var temperature: Double = 36.8
+    @Published var heartRate: Double = 130
+    @Published var spo2: Double = 98
+    @Published var bpSys: Double = 72
+    @Published var bpDia: Double = 44
+
+    enum DemoAction {
+        case rollover
+        case hypoxia
+        case fever
+        case clearDemo
+        case heartbeatTick(Int)
+    }
+
+    func apply(_ action: DemoAction, blockTickWhenDanger: Bool, overallStatus: VitalStatus) {
+        switch action {
+        case .clearDemo:
+            temperature = 36.8
+            heartRate = 130
+            spo2 = 98
+            bpSys = 72
+            bpDia = 44
+
+        case .rollover:
+            // Make it clearly "danger" and KEEP it there until Clear Demo
+            heartRate = 210
+            spo2 = 82
+            bpSys = 55
+            bpDia = 28
+
+        case .hypoxia:
+            spo2 = 78
+            heartRate = 170
+
+        case .fever:
+            temperature = 39.6
+            heartRate = 165
+
+        case .heartbeatTick(let t):
+            if blockTickWhenDanger, overallStatus == .danger { return }
+            temperature = 36.6 + Double(t % 6) * 0.05
+            heartRate = 128 + Double((t % 8) - 4) * 1.5
+            spo2 = 98 + Double((t % 6) - 3) * 0.3
+            bpSys = 72 + Double((t % 4) - 2)
+            bpDia = 44 + Double((t % 4) - 2)
+        }
+    }
 }
 
 // MARK: - Root Router (Setup -> Tabs)
@@ -411,25 +469,8 @@ struct DashboardView: View {
     let birthday: Date
     let conditions: Set<String>
 
+    @StateObject private var demo = DemoVitalsStore()
     @State private var selectedVital: VitalID?
-
-    // demo vitals
-    @State private var temperature: Double = 36.8
-    @State private var heartRate: Double = 130
-    @State private var spo2: Double = 98
-    @State private var bpSys: Double = 72
-    @State private var bpDia: Double = 44
-
-    // demo reversion (7 sec)
-    private struct Snapshot {
-        let temperature: Double
-        let heartRate: Double
-        let spo2: Double
-        let bpSys: Double
-        let bpDia: Double
-    }
-    @State private var snapshot: Snapshot? = nil
-    @State private var revertTask: Task<Void, Never>? = nil
 
     @State private var tick: Int = 0
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
@@ -438,11 +479,11 @@ struct DashboardView: View {
     private var bracket: AgeBracket { bracketFromBirthday(birthday) }
     private var base: BaselineVitals { baseline(for: bracket) }
 
-    private var tempStatus: VitalStatus { base.tempC.status(for: temperature) }
-    private var hrStatus: VitalStatus { base.heartRateBpm.status(for: heartRate) }
-    private var spo2Status: VitalStatus { base.spo2.status(for: spo2) }
-    private var sysStatus: VitalStatus { base.sysBP.status(for: bpSys) }
-    private var diaStatus: VitalStatus { base.diaBP.status(for: bpDia) }
+    private var tempStatus: VitalStatus { base.tempC.status(for: demo.temperature) }
+    private var hrStatus: VitalStatus { base.heartRateBpm.status(for: demo.heartRate) }
+    private var spo2Status: VitalStatus { base.spo2.status(for: demo.spo2) }
+    private var sysStatus: VitalStatus { base.sysBP.status(for: demo.bpSys) }
+    private var diaStatus: VitalStatus { base.diaBP.status(for: demo.bpDia) }
 
     private var overallStatus: VitalStatus {
         let statuses = [tempStatus, hrStatus, spo2Status, sysStatus, diaStatus]
@@ -457,14 +498,6 @@ struct DashboardView: View {
         GridItem(.flexible(), spacing: 12),
         GridItem(.flexible(), spacing: 12)
     ]
-
-    enum DemoAction {
-        case rollover
-        case hypoxia
-        case fever
-        case reset
-        case heartbeatTick(Int)
-    }
 
     var body: some View {
         ZStack {
@@ -483,7 +516,7 @@ struct DashboardView: View {
                             icon: "heart.fill",
                             iconTint: LullisTheme.purple4,
                             title: "Heart Rate",
-                            valueBig: "\(Int(heartRate))",
+                            valueBig: "\(Int(demo.heartRate))",
                             unit: "BPM",
                             sparkColor: LullisTheme.purple4
                         ) { selectedVital = .hr }
@@ -492,7 +525,7 @@ struct DashboardView: View {
                             icon: "wind",
                             iconTint: LullisTheme.purple3,
                             title: "Oxygen (SpO₂)",
-                            valueBig: "\(Int(spo2))",
+                            valueBig: "\(Int(demo.spo2))",
                             unit: "%",
                             sparkColor: LullisTheme.purple3
                         ) { selectedVital = .spo2 }
@@ -501,7 +534,7 @@ struct DashboardView: View {
                             icon: "thermometer",
                             iconTint: LullisTheme.purple2,
                             title: "Body Temp",
-                            valueBig: String(format: "%.1f", temperature),
+                            valueBig: String(format: "%.1f", demo.temperature),
                             unit: "°C",
                             sparkColor: LullisTheme.purple2
                         ) { selectedVital = .temp }
@@ -510,13 +543,13 @@ struct DashboardView: View {
                             icon: "drop.fill",
                             iconTint: LullisTheme.purple1,
                             title: "Blood Pressure",
-                            valueBig: "\(Int(bpSys))/\(Int(bpDia))",
+                            valueBig: "\(Int(demo.bpSys))/\(Int(demo.bpDia))",
                             unit: "mmHg",
                             sparkColor: LullisTheme.purple1
                         ) { selectedVital = .bp }
                     }
 
-                    // SIMULATE CONDITIONS
+                    // SIMULATE CONDITIONS (PERSIST UNTIL CLEAR)
                     VStack(alignment: .leading, spacing: 10) {
                         Text("SIMULATE CONDITIONS")
                             .font(.caption.weight(.semibold))
@@ -524,20 +557,18 @@ struct DashboardView: View {
 
                         HStack(spacing: 12) {
                             SmallActionPill(icon: "arrow.triangle.2.circlepath", label: "Rollover") {
-                                applyDemo(.rollover)
+                                demo.apply(.rollover, blockTickWhenDanger: true, overallStatus: overallStatus)
                             }
                             SmallActionPill(icon: "exclamationmark.triangle", label: "Hypoxia") {
-                                applyDemo(.hypoxia)
+                                demo.apply(.hypoxia, blockTickWhenDanger: true, overallStatus: overallStatus)
                             }
                             SmallActionPill(icon: "thermometer.high", label: "Fever") {
-                                applyDemo(.fever)
+                                demo.apply(.fever, blockTickWhenDanger: true, overallStatus: overallStatus)
                             }
                         }
 
-                        HStack(spacing: 12) {
-                            SmallActionPill(icon: "arrow.counterclockwise", label: "Reset") {
-                                applyDemo(.reset)
-                            }
+                        SmallActionPill(icon: "arrow.counterclockwise", label: "Clear Demo") {
+                            demo.apply(.clearDemo, blockTickWhenDanger: true, overallStatus: overallStatus)
                         }
                     }
                     .padding(.top, 4)
@@ -558,14 +589,14 @@ struct DashboardView: View {
         }
         .onReceive(timer) { _ in
             tick += 1
-            applyDemo(.heartbeatTick(tick))
+            demo.apply(.heartbeatTick(tick), blockTickWhenDanger: true, overallStatus: overallStatus)
         }
         .sheet(item: $selectedVital) { id in
             switch id {
             case .temp:
                 VitalDetailSheet(
                     title: "Body Temperature",
-                    currentValue: String(format: "%.1f °C", temperature),
+                    currentValue: String(format: "%.1f °C", demo.temperature),
                     primaryLabel: "Typical range",
                     primaryRange: base.tempC,
                     secondaryLabel: nil,
@@ -577,7 +608,7 @@ struct DashboardView: View {
             case .hr:
                 VitalDetailSheet(
                     title: "Heart Rate",
-                    currentValue: "\(Int(heartRate)) bpm",
+                    currentValue: "\(Int(demo.heartRate)) bpm",
                     primaryLabel: "Typical range",
                     primaryRange: base.heartRateBpm,
                     secondaryLabel: nil,
@@ -589,7 +620,7 @@ struct DashboardView: View {
             case .spo2:
                 VitalDetailSheet(
                     title: "Oxygen Level (SpO₂)",
-                    currentValue: "\(Int(spo2))%",
+                    currentValue: "\(Int(demo.spo2))%",
                     primaryLabel: "Typical range",
                     primaryRange: base.spo2,
                     secondaryLabel: nil,
@@ -601,7 +632,7 @@ struct DashboardView: View {
             case .bp:
                 VitalDetailSheet(
                     title: "Blood Pressure",
-                    currentValue: "\(Int(bpSys)) / \(Int(bpDia)) mmHg",
+                    currentValue: "\(Int(demo.bpSys)) / \(Int(demo.bpDia)) mmHg",
                     primaryLabel: "Systolic (SYS) typical range",
                     primaryRange: base.sysBP,
                     secondaryLabel: "Diastolic (DIA) typical range",
@@ -618,79 +649,6 @@ struct DashboardView: View {
         if a == .danger || b == .danger { return .danger }
         if a == .warning || b == .warning { return .warning }
         return .normal
-    }
-
-    private func beginOrRefreshDemoWindow() {
-        if snapshot == nil {
-            snapshot = Snapshot(
-                temperature: temperature,
-                heartRate: heartRate,
-                spo2: spo2,
-                bpSys: bpSys,
-                bpDia: bpDia
-            )
-        }
-
-        revertTask?.cancel()
-        revertTask = Task {
-            try? await Task.sleep(nanoseconds: 7_000_000_000)
-            if let snap = snapshot {
-                temperature = snap.temperature
-                heartRate = snap.heartRate
-                spo2 = snap.spo2
-                bpSys = snap.bpSys
-                bpDia = snap.bpDia
-            }
-            snapshot = nil
-        }
-    }
-
-    private func applyDemo(_ action: DemoAction) {
-        switch action {
-        case .reset:
-            revertTask?.cancel()
-            revertTask = nil
-            snapshot = nil
-            temperature = 36.8
-            heartRate = 130
-            spo2 = 98
-            bpSys = 72
-            bpDia = 44
-            return
-
-        case .rollover, .hypoxia, .fever:
-            beginOrRefreshDemoWindow()
-
-        case .heartbeatTick:
-            // don't snapshot / revert for the background animation tick
-            break
-        }
-
-        switch action {
-        case .rollover:
-            heartRate = max(70, heartRate - 20)
-            spo2 = max(85, spo2 - 3)
-            bpSys = max(50, bpSys - 10)
-            bpDia = max(30, bpDia - 6)
-
-        case .hypoxia:
-            spo2 = max(75, spo2 - 8)
-            heartRate = min(190, heartRate + 8)
-
-        case .fever:
-            temperature = min(40.5, temperature + 0.6)
-            heartRate = min(190, heartRate + 10)
-
-        case .heartbeatTick(let t):
-            temperature = 36.6 + Double(t % 6) * 0.05
-            heartRate = 128 + Double((t % 8) - 4) * 1.5
-            spo2 = 98 + Double((t % 6) - 3) * 0.3
-            bpSys = 72 + Double((t % 4) - 2)
-            bpDia = 44 + Double((t % 4) - 2)
-
-        case .reset:
-            break
-        }
     }
 
     private var headerRow: some View {
@@ -734,9 +692,9 @@ struct DashboardView: View {
                     .foregroundColor(.secondary)
 
                 HStack(spacing: 8) {
-                    Circle().fill(Color.gray)
+                    Circle().fill(Color.orange)
                         .frame(width: 10, height: 10)
-                    Text("Demo")
+                    Text("Demo Mode")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                 }
@@ -780,11 +738,7 @@ struct StatusBanner: View {
     }
 
     private var tint: Color {
-        switch status {
-        case .normal: return .green
-        case .warning: return .orange
-        case .danger: return .red
-        }
+        status.color
     }
 
     private var titleText: String {
@@ -973,7 +927,6 @@ struct VitalDetailSheet: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 18) {
-
                 VStack(spacing: 12) {
                     Text(title)
                         .font(.system(size: 28, weight: .bold, design: .rounded))
@@ -1176,6 +1129,7 @@ struct ProfileView: View {
                         .font(.system(size: 28, weight: .bold, design: .rounded))
                         .padding(.top, 10)
 
+                    // Avatar card
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Avatar")
                             .font(.subheadline)
@@ -1194,6 +1148,7 @@ struct ProfileView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                     .shadow(color: LullisTheme.shadow, radius: 12, x: 0, y: 6)
 
+                    // Name/Age + Weight/Sex as 2-up grid
                     LazyVGrid(columns: twoCols, spacing: 12) {
                         infoCard(title: "Name") { Text(babyName).font(.headline) }
                         infoCard(title: "Age") { Text(ageText).font(.headline) }
@@ -1274,6 +1229,43 @@ struct ConditionPill: View {
         )
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .shadow(color: LullisTheme.shadow, radius: 10, x: 0, y: 6)
+    }
+}
+
+// MARK: - InfoCard (kept)
+
+struct InfoCard: View {
+    let icon: String
+    let title: String
+    let message: String
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 18, style: .continuous)
+            .fill(Color(red: 0.93, green: 0.95, blue: 1.0).opacity(0.9))
+            .overlay(
+                HStack(alignment: .top, spacing: 12) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(Color.white.opacity(0.9))
+                            .frame(width: 44, height: 44)
+                        Image(systemName: icon)
+                            .foregroundColor(LullisTheme.primary)
+                            .font(.system(size: 18, weight: .bold))
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(title)
+                            .font(.headline)
+                            .foregroundColor(.black.opacity(0.85))
+                        Text(message)
+                            .foregroundColor(LullisTheme.primary.opacity(0.85))
+                            .font(.subheadline)
+                    }
+
+                    Spacer()
+                }
+                .padding(14)
+            )
     }
 }
 
