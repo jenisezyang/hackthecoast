@@ -469,6 +469,10 @@ struct DashboardView: View {
 
     @StateObject private var demo = DemoVitalsStore()
     @State private var selectedVital: VitalID?
+    
+    @AppStorage("babySex") private var babySex: String = Sex.male.rawValue
+    @AppStorage("babyWeightKg") private var babyWeightKg: Double = 3.5
+
 
     @State private var tick: Int = 0
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
@@ -601,7 +605,9 @@ struct DashboardView: View {
                     secondaryRange: nil,
                     status: tempStatus,
                     ageBracket: bracket,
-                    conditions: conditions
+                    conditions: conditions,
+                    sex: babySex,
+                    weightKg: babyWeightKg
                 )
             case .hr:
                 VitalDetailSheet(
@@ -613,7 +619,9 @@ struct DashboardView: View {
                     secondaryRange: nil,
                     status: hrStatus,
                     ageBracket: bracket,
-                    conditions: conditions
+                    conditions: conditions,
+                    sex: babySex,
+                    weightKg: babyWeightKg
                 )
             case .spo2:
                 VitalDetailSheet(
@@ -625,7 +633,9 @@ struct DashboardView: View {
                     secondaryRange: nil,
                     status: spo2Status,
                     ageBracket: bracket,
-                    conditions: conditions
+                    conditions: conditions,
+                    sex: babySex,
+                    weightKg: babyWeightKg
                 )
             case .bp:
                 VitalDetailSheet(
@@ -637,7 +647,9 @@ struct DashboardView: View {
                     secondaryRange: base.diaBP,
                     status: maxStatus(sysStatus, diaStatus),
                     ageBracket: bracket,
-                    conditions: conditions
+                    conditions: conditions,
+                    sex: babySex,
+                    weightKg: babyWeightKg
                 )
             }
         }
@@ -907,8 +919,7 @@ struct DangerCard: View {
 }
 
 // MARK: - Vital Detail Sheet
-
-
+// MARK: - Vital Detail Sheet (ALWAYS CALL GEMINI)
 
 struct VitalDetailSheet: View {
     let title: String
@@ -924,7 +935,7 @@ struct VitalDetailSheet: View {
     let ageBracket: AgeBracket
     let conditions: Set<String>
 
-    // ✅ pass these in from DashboardView/Profile storage
+    // ✅ pass these in
     let sex: String
     let weightKg: Double
 
@@ -932,9 +943,6 @@ struct VitalDetailSheet: View {
     @State private var aiText: String = ""
     @State private var aiLoading: Bool = false
     @State private var aiError: String?
-
-    // cache per vital so it doesn’t spam requests when sheet reopens quickly
-    @State private var lastPromptHash: Int?
 
     var body: some View {
         ScrollView {
@@ -965,7 +973,7 @@ struct VitalDetailSheet: View {
                                   value: secondaryRange.label(decimals: 0))
                     }
 
-                    // ✅ AI Personalized explanation block (this is the new part)
+                    // ✅ ALWAYS calls Gemini when the sheet appears and when inputs change
                     aiCard
 
                     if !conditions.isEmpty {
@@ -995,9 +1003,18 @@ struct VitalDetailSheet: View {
         .scrollIndicators(.visible)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
-        .task {
-            await loadAIIfNeeded()
-        }
+
+        // ✅ call once when sheet opens
+        .task { await loadAI() }
+
+        // ✅ call again when these change (re-opens or different vitals)
+        .onChange(of: title) { _, _ in Task { await loadAI() } }
+        .onChange(of: currentValue) { _, _ in Task { await loadAI() } }
+        .onChange(of: statusLabel) { _, _ in Task { await loadAI() } }
+        .onChange(of: ageBracket.rawValue) { _, _ in Task { await loadAI() } }
+        .onChange(of: sex) { _, _ in Task { await loadAI() } }
+        .onChange(of: weightKg) { _, _ in Task { await loadAI() } }
+        .onChange(of: conditions.sorted().joined(separator: ",")) { _, _ in Task { await loadAI() } }
     }
 
     // MARK: - AI UI
@@ -1008,9 +1025,7 @@ struct VitalDetailSheet: View {
                 Text("Personalized explanation")
                     .font(.headline)
                 Spacer()
-                if aiLoading {
-                    ProgressView().scaleEffect(0.9)
-                }
+                if aiLoading { ProgressView().scaleEffect(0.9) }
             }
 
             if let aiError {
@@ -1019,7 +1034,7 @@ struct VitalDetailSheet: View {
                     .font(.subheadline)
 
                 Button("Try again") {
-                    Task { await loadAI(force: true) }
+                    Task { await loadAI() }
                 }
                 .font(.subheadline.weight(.semibold))
             } else if !aiText.isEmpty {
@@ -1052,7 +1067,15 @@ struct VitalDetailSheet: View {
         .cornerRadius(14)
     }
 
-    // MARK: - AI Prompt + Load
+    // MARK: - Gemini prompt + call
+
+    private var statusLabel: String {
+        switch status {
+        case .normal: return "normal"
+        case .warning: return "warning"
+        case .danger: return "danger"
+        }
+    }
 
     private func makePrompt() -> String {
         let conditionText = conditions.isEmpty ? "None" : conditions.sorted().joined(separator: ", ")
@@ -1073,39 +1096,24 @@ struct VitalDetailSheet: View {
         """
     }
 
-    private var statusLabel: String {
-        switch status {
-        case .normal: return "normal"
-        case .warning: return "warning"
-        case .danger: return "danger"
-        }
-    }
-
-    private func loadAIIfNeeded() async {
-        await loadAI(force: false)
-    }
-
-    private func loadAI(force: Bool) async {
-        let prompt = makePrompt()
-        let hash = prompt.hashValue
-
-        if !force, lastPromptHash == hash, !aiText.isEmpty { return }
-        lastPromptHash = hash
-
+    private func loadAI() async {
         aiLoading = true
         aiError = nil
+        aiText = ""
+
+        let prompt = makePrompt()
 
         do {
             let text = try await GeminiService.shared.generate(prompt: prompt)
             aiText = text
         } catch {
             aiError = "Could not generate explanation."
-            aiText = ""
         }
 
         aiLoading = false
     }
 }
+
 
 // MARK: - Hospitals Tab
 
