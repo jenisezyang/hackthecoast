@@ -925,6 +925,9 @@ struct DangerCard: View {
 // MARK: - Vital Detail Sheet
 // MARK: - Vital Detail Sheet (ALWAYS CALL GEMINI)
 
+// ✅ REPLACE your entire VitalDetailSheet struct with this.
+// (Delete your current VitalDetailSheet completely, then paste this.)
+
 struct VitalDetailSheet: View {
     let title: String
     let currentValue: String
@@ -942,7 +945,7 @@ struct VitalDetailSheet: View {
     let sex: String
     let weightKg: Double
 
-    // ✅ add this ONCE and keep it near the bottom
+    // ✅ passed in from DashboardView (.sheet call)
     let refreshValue: Double
 
     @State private var aiText: String = ""
@@ -950,12 +953,11 @@ struct VitalDetailSheet: View {
     @State private var aiError: String?
 
     @State private var lastAIValue: Double?
-    @State private var lastAIStatus: String?
+    @State private var lastAIStatus: VitalStatus?
 
     var body: some View {
         ScrollView {
             VStack(spacing: 18) {
-
                 VStack(spacing: 12) {
                     Text(title)
                         .font(.system(size: 28, weight: .bold, design: .rounded))
@@ -973,15 +975,15 @@ struct VitalDetailSheet: View {
                 .frame(maxWidth: .infinity)
 
                 VStack(spacing: 12) {
-                    rangeCard(label: primaryLabel,
-                              value: primaryRange.label(decimals: title == "Body Temperature" ? 1 : 0))
+                    rangeCard(
+                        label: primaryLabel,
+                        value: primaryRange.label(decimals: title == "Body Temperature" ? 1 : 0)
+                    )
 
                     if let secondaryLabel, let secondaryRange {
-                        rangeCard(label: secondaryLabel,
-                                  value: secondaryRange.label(decimals: 0))
+                        rangeCard(label: secondaryLabel, value: secondaryRange.label(decimals: 0))
                     }
 
-                    // ✅ ALWAYS calls Gemini when the sheet appears and when inputs change
                     aiCard
 
                     if !conditions.isEmpty {
@@ -1007,62 +1009,46 @@ struct VitalDetailSheet: View {
                 .padding(.horizontal, 16)
                 .padding(.bottom, 24)
             }
-
         }
         .scrollIndicators(.visible)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
 
-
+        // ✅ load once when sheet opens
         .task {
-                lastAIValue = refreshValue
-                lastAIStatus = statusLabel
-                await loadAI()
+            lastAIValue = refreshValue
+            lastAIStatus = status
+            await loadAI()
+        }
+
+        // ✅ re-prompt if value changes by >= 2%
+        .onChange(of: refreshValue) { _, newVal in
+            guard let old = lastAIValue, old != 0 else {
+                lastAIValue = newVal
+                return
             }
-            .onChange(of: refreshValue) { _, newVal in
-                guard let old = lastAIValue, old != 0 else {
-                    lastAIValue = newVal
-                    return
-                }
-                let pct = abs((newVal - old) / old) * 100.0
-                if pct >= 2.0 {
-                    Task { await loadAI() }
-                    lastAIValue = newVal
-                }
-            }
-            .onChange(of: statusLabel) { _, newStatus in
-                if let last = lastAIStatus, last != newStatus {
-                    Task { await loadAI() }
-                }
-                lastAIStatus = newStatus
+            let pct = abs((newVal - old) / old) * 100.0
+            if pct >= 2.0 {
+                Task { await loadAI() }
+                lastAIValue = newVal
             }
         }
 
-        // ✅ call again when these change (re-opens or different vitals)
+        // ✅ re-prompt if status changes (normal/warning/danger)
+        .onChange(of: status) { _, newStatus in
+            if let last = lastAIStatus, last != newStatus {
+                Task { await loadAI() }
+            }
+            lastAIStatus = newStatus
+        }
+
+        // ✅ optional: re-prompt if inputs change while sheet is open
         .onChange(of: title) { _, _ in Task { await loadAI() } }
         .onChange(of: currentValue) { _, _ in Task { await loadAI() } }
-        .onChange(of: statusLabel) { _, _ in Task { await loadAI() } }
         .onChange(of: ageBracket.rawValue) { _, _ in Task { await loadAI() } }
         .onChange(of: sex) { _, _ in Task { await loadAI() } }
         .onChange(of: weightKg) { _, _ in Task { await loadAI() } }
         .onChange(of: conditions.sorted().joined(separator: ",")) { _, _ in Task { await loadAI() } }
-    }
-    
-    private var refreshSignal: Double {
-        switch title {
-        case "Heart Rate":
-            return Double(currentValue.components(separatedBy: " ").first ?? "") ?? 0
-        case "Oxygen Level (SpO₂)":
-            return Double(currentValue.replacingOccurrences(of: "%", with: "")) ?? 0
-        case "Body Temperature":
-            return Double(currentValue.replacingOccurrences(of: " °C", with: "")) ?? 0
-        case "Blood Pressure":
-            // use systolic as primary signal
-            let parts = currentValue.components(separatedBy: "/")
-            return Double(parts.first ?? "") ?? 0
-        default:
-            return 0
-        }
     }
 
     // MARK: - AI UI
@@ -1106,8 +1092,7 @@ struct VitalDetailSheet: View {
     private func rangeCard(label: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(label).font(.headline)
-            Text(value)
-                .font(.title3.weight(.semibold))
+            Text(value).font(.title3.weight(.semibold))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
@@ -1149,25 +1134,17 @@ struct VitalDetailSheet: View {
         aiError = nil
         aiText = ""
 
-        let prompt = makePrompt()
-
         do {
-            let text = try await GeminiService.shared.generate(prompt: prompt)
+            let text = try await GeminiService.shared.generate(prompt: makePrompt())
             aiText = text
-
-            // ✅ record last AI inputs so we can compare later
-            lastAIValue = refreshValue
-            lastAIStatus = statusLabel
         } catch {
-            aiError = error.localizedDescription   // ✅ show real error
+            aiError = error.localizedDescription
             aiText = ""
         }
 
         aiLoading = false
     }
 }
-
-
 // MARK: - Hospitals Tab
 
 struct HospitalsView: View {
