@@ -1,19 +1,17 @@
 import SwiftUI
-import CoreBluetooth
 import Combine
 import UIKit
 
 // MARK: - Theme
 
 enum LullisTheme {
-    static let primary = Color(red: 0.33, green: 0.29, blue: 0.95)     // purple-ish
+    static let primary = Color(red: 0.33, green: 0.29, blue: 0.95)
     static let bgTop   = Color(red: 0.95, green: 0.97, blue: 1.00)
     static let bgBot   = Color(red: 1.00, green: 0.97, blue: 0.98)
 
     static let cardFill = Color.white.opacity(0.86)
     static let shadow = Color.black.opacity(0.08)
 
-    // #CCCCFF + a few slightly darker shades (same hue family)
     static let purple1 = Color(red: 204/255, green: 204/255, blue: 255/255) // #CCCCFF
     static let purple2 = Color(red: 184/255, green: 184/255, blue: 255/255)
     static let purple3 = Color(red: 163/255, green: 163/255, blue: 255/255)
@@ -57,7 +55,6 @@ struct VitalRange {
     let low: Double
     let high: Double
 
-    // Danger if out of range; Warning if within 10% of edges
     func status(for value: Double) -> VitalStatus {
         if value < low || value > high { return .danger }
         let width = max(0.0001, high - low)
@@ -341,7 +338,6 @@ struct SetupView: View {
                         babySex = selectedSex.rawValue
                         let cleaned = weightText.replacingOccurrences(of: ",", with: ".")
                         babyWeightKg = Double(cleaned) ?? babyWeightKg
-
                         hasCompletedSetup = true
                     } label: {
                         Text("Continue")
@@ -408,35 +404,45 @@ struct MultipleChoiceRow: View {
     }
 }
 
-// MARK: - Dashboard Screen
+// MARK: - Dashboard Screen (DEMO ONLY)
 
 struct DashboardView: View {
     let babyName: String
     let birthday: Date
     let conditions: Set<String>
 
-    @StateObject private var bt: BluetoothManager
     @State private var selectedVital: VitalID?
+
+    // demo vitals
+    @State private var temperature: Double = 36.8
+    @State private var heartRate: Double = 130
+    @State private var spo2: Double = 98
+    @State private var bpSys: Double = 72
+    @State private var bpDia: Double = 44
+
+    // demo reversion (7 sec)
+    private struct Snapshot {
+        let temperature: Double
+        let heartRate: Double
+        let spo2: Double
+        let bpSys: Double
+        let bpDia: Double
+    }
+    @State private var snapshot: Snapshot? = nil
+    @State private var revertTask: Task<Void, Never>? = nil
 
     @State private var tick: Int = 0
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
-
-    init(babyName: String, birthday: Date, conditions: Set<String>) {
-        self.babyName = babyName
-        self.birthday = birthday
-        self.conditions = conditions
-        _bt = StateObject(wrappedValue: BluetoothManager())
-    }
 
     private var ageDays: Int { max(0, daysBetween(birthday, Date())) }
     private var bracket: AgeBracket { bracketFromBirthday(birthday) }
     private var base: BaselineVitals { baseline(for: bracket) }
 
-    private var tempStatus: VitalStatus { base.tempC.status(for: bt.temperature) }
-    private var hrStatus: VitalStatus { base.heartRateBpm.status(for: bt.heartRate) }
-    private var spo2Status: VitalStatus { base.spo2.status(for: bt.spo2) }
-    private var sysStatus: VitalStatus { base.sysBP.status(for: bt.bpSys) }
-    private var diaStatus: VitalStatus { base.diaBP.status(for: bt.bpDia) }
+    private var tempStatus: VitalStatus { base.tempC.status(for: temperature) }
+    private var hrStatus: VitalStatus { base.heartRateBpm.status(for: heartRate) }
+    private var spo2Status: VitalStatus { base.spo2.status(for: spo2) }
+    private var sysStatus: VitalStatus { base.sysBP.status(for: bpSys) }
+    private var diaStatus: VitalStatus { base.diaBP.status(for: bpDia) }
 
     private var overallStatus: VitalStatus {
         let statuses = [tempStatus, hrStatus, spo2Status, sysStatus, diaStatus]
@@ -447,13 +453,18 @@ struct DashboardView: View {
 
     private var anyDanger: Bool { overallStatus == .danger }
 
-    // demo controls allowed only when NOT connected
-    private var demoEnabled: Bool { !bt.isConnected }
-
     private let columns = [
         GridItem(.flexible(), spacing: 12),
         GridItem(.flexible(), spacing: 12)
     ]
+
+    enum DemoAction {
+        case rollover
+        case hypoxia
+        case fever
+        case reset
+        case heartbeatTick(Int)
+    }
 
     var body: some View {
         ZStack {
@@ -472,7 +483,7 @@ struct DashboardView: View {
                             icon: "heart.fill",
                             iconTint: LullisTheme.purple4,
                             title: "Heart Rate",
-                            valueBig: "\(Int(bt.heartRate))",
+                            valueBig: "\(Int(heartRate))",
                             unit: "BPM",
                             sparkColor: LullisTheme.purple4
                         ) { selectedVital = .hr }
@@ -481,7 +492,7 @@ struct DashboardView: View {
                             icon: "wind",
                             iconTint: LullisTheme.purple3,
                             title: "Oxygen (SpO₂)",
-                            valueBig: "\(Int(bt.spo2))",
+                            valueBig: "\(Int(spo2))",
                             unit: "%",
                             sparkColor: LullisTheme.purple3
                         ) { selectedVital = .spo2 }
@@ -490,7 +501,7 @@ struct DashboardView: View {
                             icon: "thermometer",
                             iconTint: LullisTheme.purple2,
                             title: "Body Temp",
-                            valueBig: String(format: "%.1f", bt.temperature),
+                            valueBig: String(format: "%.1f", temperature),
                             unit: "°C",
                             sparkColor: LullisTheme.purple2
                         ) { selectedVital = .temp }
@@ -499,53 +510,34 @@ struct DashboardView: View {
                             icon: "drop.fill",
                             iconTint: LullisTheme.purple1,
                             title: "Blood Pressure",
-                            valueBig: "\(Int(bt.bpSys))/\(Int(bt.bpDia))",
+                            valueBig: "\(Int(bpSys))/\(Int(bpDia))",
                             unit: "mmHg",
                             sparkColor: LullisTheme.purple1
                         ) { selectedVital = .bp }
                     }
 
-                    // SIMULATE CONDITIONS (locked while connected)
+                    // SIMULATE CONDITIONS
                     VStack(alignment: .leading, spacing: 10) {
-                        HStack {
-                            Text("SIMULATE CONDITIONS")
-                                .font(.caption.weight(.semibold))
-                                .foregroundColor(.secondary)
+                        Text("SIMULATE CONDITIONS")
+                            .font(.caption.weight(.semibold))
+                            .foregroundColor(.secondary)
 
-                            Spacer()
-
-                            if !demoEnabled {
-                                Text("Locked while connected")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundColor(.black.opacity(0.65))
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 6)
-                                    .background(LullisTheme.purple1.opacity(0.9)) // #CCCCFF shade
-                                    .clipShape(Capsule())
+                        HStack(spacing: 12) {
+                            SmallActionPill(icon: "arrow.triangle.2.circlepath", label: "Rollover") {
+                                applyDemo(.rollover)
+                            }
+                            SmallActionPill(icon: "exclamationmark.triangle", label: "Hypoxia") {
+                                applyDemo(.hypoxia)
+                            }
+                            SmallActionPill(icon: "thermometer.high", label: "Fever") {
+                                applyDemo(.fever)
                             }
                         }
 
                         HStack(spacing: 12) {
-                            SmallActionPill(icon: "arrow.triangle.2.circlepath", label: "Rollover") {
-                                guard demoEnabled else { return }
-                                bt.applyDemo(.rollover)
+                            SmallActionPill(icon: "arrow.counterclockwise", label: "Reset") {
+                                applyDemo(.reset)
                             }
-                            .disabled(!demoEnabled)
-                            .opacity(demoEnabled ? 1 : 0.45)
-
-                            SmallActionPill(icon: "exclamationmark.triangle", label: "Hypoxia") {
-                                guard demoEnabled else { return }
-                                bt.applyDemo(.hypoxia)
-                            }
-                            .disabled(!demoEnabled)
-                            .opacity(demoEnabled ? 1 : 0.45)
-
-                            SmallActionPill(icon: "thermometer.high", label: "Fever") {
-                                guard demoEnabled else { return }
-                                bt.applyDemo(.fever)
-                            }
-                            .disabled(!demoEnabled)
-                            .opacity(demoEnabled ? 1 : 0.45)
                         }
                     }
                     .padding(.top, 4)
@@ -555,20 +547,6 @@ struct DashboardView: View {
                             HospitalsView.openHospitalsAppleMaps()
                         }
                     }
-
-                    Button {
-                        bt.isConnected ? bt.disconnect() : bt.startScanning()
-                    } label: {
-                        Text(bt.isConnected ? "Disconnect Device" : "Connect Device")
-                            .font(.headline)
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 16)
-                            .background(bt.isConnected ? Color.red : LullisTheme.primary)
-                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                            .shadow(color: (bt.isConnected ? Color.red : LullisTheme.primary).opacity(0.25), radius: 16, x: 0, y: 10)
-                    }
-                    .padding(.top, 6)
 
                     Spacer(minLength: 12)
                 }
@@ -580,17 +558,14 @@ struct DashboardView: View {
         }
         .onReceive(timer) { _ in
             tick += 1
-            // only animate demo vitals when NOT connected
-            if demoEnabled {
-                bt.applyDemo(.heartbeatTick(tick))
-            }
+            applyDemo(.heartbeatTick(tick))
         }
         .sheet(item: $selectedVital) { id in
             switch id {
             case .temp:
                 VitalDetailSheet(
                     title: "Body Temperature",
-                    currentValue: String(format: "%.1f °C", bt.temperature),
+                    currentValue: String(format: "%.1f °C", temperature),
                     primaryLabel: "Typical range",
                     primaryRange: base.tempC,
                     secondaryLabel: nil,
@@ -602,7 +577,7 @@ struct DashboardView: View {
             case .hr:
                 VitalDetailSheet(
                     title: "Heart Rate",
-                    currentValue: "\(Int(bt.heartRate)) bpm",
+                    currentValue: "\(Int(heartRate)) bpm",
                     primaryLabel: "Typical range",
                     primaryRange: base.heartRateBpm,
                     secondaryLabel: nil,
@@ -614,7 +589,7 @@ struct DashboardView: View {
             case .spo2:
                 VitalDetailSheet(
                     title: "Oxygen Level (SpO₂)",
-                    currentValue: "\(Int(bt.spo2))%",
+                    currentValue: "\(Int(spo2))%",
                     primaryLabel: "Typical range",
                     primaryRange: base.spo2,
                     secondaryLabel: nil,
@@ -626,7 +601,7 @@ struct DashboardView: View {
             case .bp:
                 VitalDetailSheet(
                     title: "Blood Pressure",
-                    currentValue: "\(Int(bt.bpSys)) / \(Int(bt.bpDia)) mmHg",
+                    currentValue: "\(Int(bpSys)) / \(Int(bpDia)) mmHg",
                     primaryLabel: "Systolic (SYS) typical range",
                     primaryRange: base.sysBP,
                     secondaryLabel: "Diastolic (DIA) typical range",
@@ -643,6 +618,79 @@ struct DashboardView: View {
         if a == .danger || b == .danger { return .danger }
         if a == .warning || b == .warning { return .warning }
         return .normal
+    }
+
+    private func beginOrRefreshDemoWindow() {
+        if snapshot == nil {
+            snapshot = Snapshot(
+                temperature: temperature,
+                heartRate: heartRate,
+                spo2: spo2,
+                bpSys: bpSys,
+                bpDia: bpDia
+            )
+        }
+
+        revertTask?.cancel()
+        revertTask = Task {
+            try? await Task.sleep(nanoseconds: 7_000_000_000)
+            if let snap = snapshot {
+                temperature = snap.temperature
+                heartRate = snap.heartRate
+                spo2 = snap.spo2
+                bpSys = snap.bpSys
+                bpDia = snap.bpDia
+            }
+            snapshot = nil
+        }
+    }
+
+    private func applyDemo(_ action: DemoAction) {
+        switch action {
+        case .reset:
+            revertTask?.cancel()
+            revertTask = nil
+            snapshot = nil
+            temperature = 36.8
+            heartRate = 130
+            spo2 = 98
+            bpSys = 72
+            bpDia = 44
+            return
+
+        case .rollover, .hypoxia, .fever:
+            beginOrRefreshDemoWindow()
+
+        case .heartbeatTick:
+            // don't snapshot / revert for the background animation tick
+            break
+        }
+
+        switch action {
+        case .rollover:
+            heartRate = max(70, heartRate - 20)
+            spo2 = max(85, spo2 - 3)
+            bpSys = max(50, bpSys - 10)
+            bpDia = max(30, bpDia - 6)
+
+        case .hypoxia:
+            spo2 = max(75, spo2 - 8)
+            heartRate = min(190, heartRate + 8)
+
+        case .fever:
+            temperature = min(40.5, temperature + 0.6)
+            heartRate = min(190, heartRate + 10)
+
+        case .heartbeatTick(let t):
+            temperature = 36.6 + Double(t % 6) * 0.05
+            heartRate = 128 + Double((t % 8) - 4) * 1.5
+            spo2 = 98 + Double((t % 6) - 3) * 0.3
+            bpSys = 72 + Double((t % 4) - 2)
+            bpDia = 44 + Double((t % 4) - 2)
+
+        case .reset:
+            break
+        }
     }
 
     private var headerRow: some View {
@@ -686,9 +734,9 @@ struct DashboardView: View {
                     .foregroundColor(.secondary)
 
                 HStack(spacing: 8) {
-                    Circle().fill(bt.isConnected ? Color.green : Color.red)
+                    Circle().fill(Color.gray)
                         .frame(width: 10, height: 10)
-                    Text(bt.isConnected ? "Connected" : "Disconnected")
+                    Text("Demo")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                 }
@@ -1128,7 +1176,6 @@ struct ProfileView: View {
                         .font(.system(size: 28, weight: .bold, design: .rounded))
                         .padding(.top, 10)
 
-                    // Avatar card
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Avatar")
                             .font(.subheadline)
@@ -1147,7 +1194,6 @@ struct ProfileView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                     .shadow(color: LullisTheme.shadow, radius: 12, x: 0, y: 6)
 
-                    // Name/Age + Weight/Sex as 2-up grid
                     LazyVGrid(columns: twoCols, spacing: 12) {
                         infoCard(title: "Name") { Text(babyName).font(.headline) }
                         infoCard(title: "Age") { Text(ageText).font(.headline) }
@@ -1198,14 +1244,12 @@ struct ProfileView: View {
             content()
                 .multilineTextAlignment(.center)
         }
-        .frame(maxWidth: .infinity, minHeight: 86, alignment: .center) // ✅ centers in the card
+        .frame(maxWidth: .infinity, minHeight: 86, alignment: .center)
         .padding(16)
         .background(LullisTheme.cardFill)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .shadow(color: LullisTheme.shadow, radius: 12, x: 0, y: 6)
     }
-
-
 }
 
 struct ConditionPill: View {
@@ -1230,225 +1274,6 @@ struct ConditionPill: View {
         )
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .shadow(color: LullisTheme.shadow, radius: 10, x: 0, y: 6)
-    }
-}
-
-// MARK: - InfoCard (kept)
-
-struct InfoCard: View {
-    let icon: String
-    let title: String
-    let message: String
-
-    var body: some View {
-        RoundedRectangle(cornerRadius: 18, style: .continuous)
-            .fill(Color(red: 0.93, green: 0.95, blue: 1.0).opacity(0.9))
-            .overlay(
-                HStack(alignment: .top, spacing: 12) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(Color.white.opacity(0.9))
-                            .frame(width: 44, height: 44)
-                        Image(systemName: icon)
-                            .foregroundColor(LullisTheme.primary)
-                            .font(.system(size: 18, weight: .bold))
-                    }
-
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(title)
-                            .font(.headline)
-                            .foregroundColor(.black.opacity(0.85))
-                        Text(message)
-                            .foregroundColor(LullisTheme.primary.opacity(0.85))
-                            .font(.subheadline)
-                    }
-
-                    Spacer()
-                }
-                .padding(14)
-            )
-    }
-}
-
-// MARK: - Bluetooth Manager (Prototype)
-// Expected strings from Arduino later:
-// "TEMP:36.9,HR:132,SPO2:98,BPSYS:72,BPDIA:44"
-
-@MainActor
-final class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeripheralDelegate {
-    @Published var isConnected = false
-
-    @Published var temperature: Double = 36.8
-    @Published var heartRate: Double = 130
-    @Published var spo2: Double = 98
-    @Published var bpSys: Double = 72
-    @Published var bpDia: Double = 44
-
-    enum DemoAction {
-        case rollover
-        case hypoxia
-        case fever
-        case heartbeatTick(Int)
-    }
-
-    // Demo reversion (7 seconds)
-    private struct VitalsSnapshot {
-        let temperature: Double
-        let heartRate: Double
-        let spo2: Double
-        let bpSys: Double
-        let bpDia: Double
-    }
-    private var demoSnapshot: VitalsSnapshot?
-    private var demoRevertTask: Task<Void, Never>?
-
-    private func beginOrRefreshDemoWindow() {
-        if demoSnapshot == nil {
-            demoSnapshot = VitalsSnapshot(
-                temperature: temperature,
-                heartRate: heartRate,
-                spo2: spo2,
-                bpSys: bpSys,
-                bpDia: bpDia
-            )
-        }
-
-        demoRevertTask?.cancel()
-        demoRevertTask = Task { [weak self] in
-            guard let self else { return }
-            try? await Task.sleep(nanoseconds: 7_000_000_000)
-
-            guard !self.isConnected else {
-                self.demoSnapshot = nil
-                return
-            }
-
-            if let snap = self.demoSnapshot {
-                self.temperature = snap.temperature
-                self.heartRate = snap.heartRate
-                self.spo2 = snap.spo2
-                self.bpSys = snap.bpSys
-                self.bpDia = snap.bpDia
-            }
-            self.demoSnapshot = nil
-        }
-    }
-
-    func applyDemo(_ action: DemoAction) {
-        guard !isConnected else { return }
-        beginOrRefreshDemoWindow()
-
-        switch action {
-        case .rollover:
-            heartRate = max(80, heartRate - 8)
-        case .hypoxia:
-            spo2 = max(80, spo2 - 5)
-        case .fever:
-            temperature = min(40.0, temperature + 0.4)
-        case .heartbeatTick(let tick):
-            temperature = 36.6 + (Double((tick % 6)) * 0.05)
-        }
-    }
-
-    private var centralManager: CBCentralManager!
-    private var peripheral: CBPeripheral?
-
-    override init() {
-        super.init()
-        centralManager = CBCentralManager(delegate: self, queue: nil)
-    }
-
-    func startScanning() {
-        centralManager.scanForPeripherals(withServices: nil, options: nil)
-    }
-
-    func disconnect() {
-        if let p = peripheral { centralManager.cancelPeripheralConnection(p) }
-    }
-
-    func centralManagerDidUpdateState(_ central: CBCentralManager) {
-        if central.state != .poweredOn { isConnected = false }
-    }
-
-    func centralManager(_ central: CBCentralManager,
-                        didDiscover peripheral: CBPeripheral,
-                        advertisementData: [String : Any],
-                        rssi RSSI: NSNumber) {
-        let name = peripheral.name ?? ""
-        if name.contains("Arduino") || name.contains("Lullis") || name.contains("101") {
-            self.peripheral = peripheral
-            centralManager.stopScan()
-            centralManager.connect(peripheral, options: nil)
-        }
-    }
-
-    func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
-        // cancel demo revert + clear snapshot when a real device connects
-        demoRevertTask?.cancel()
-        demoRevertTask = nil
-        demoSnapshot = nil
-
-        isConnected = true
-        peripheral.delegate = self
-        peripheral.discoverServices(nil)
-    }
-
-    func centralManager(_ central: CBCentralManager,
-                        didDisconnectPeripheral peripheral: CBPeripheral,
-                        error: Error?) {
-        isConnected = false
-        self.peripheral = nil
-    }
-
-    func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
-        guard let services = peripheral.services else { return }
-        for s in services { peripheral.discoverCharacteristics(nil, for: s) }
-    }
-
-    func peripheral(_ peripheral: CBPeripheral,
-                    didDiscoverCharacteristicsFor service: CBService,
-                    error: Error?) {
-        guard let characteristics = service.characteristics else { return }
-        for c in characteristics where c.properties.contains(.notify) {
-            peripheral.setNotifyValue(true, for: c)
-        }
-    }
-
-    func peripheral(_ peripheral: CBPeripheral,
-                    didUpdateValueFor characteristic: CBCharacteristic,
-                    error: Error?) {
-        guard let data = characteristic.value else { return }
-        if let str = String(data: data, encoding: .utf8) {
-            parseIncoming(str)
-        }
-    }
-
-    private func parseIncoming(_ str: String) {
-        let parts = str
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .components(separatedBy: ",")
-
-        for part in parts {
-            let kv = part.components(separatedBy: ":")
-            guard kv.count == 2 else { continue }
-            let key = kv[0].uppercased()
-            let value = kv[1]
-
-            switch key {
-            case "TEMP":
-                if let v = Double(value) { temperature = v }
-            case "HR":
-                if let v = Double(value) { heartRate = v }
-            case "SPO2":
-                if let v = Double(value) { spo2 = v }
-            case "BPSYS":
-                if let v = Double(value) { bpSys = v }
-            case "BPDIA":
-                if let v = Double(value) { bpDia = v }
-            default:
-                break
-            }
-        }
     }
 }
 
