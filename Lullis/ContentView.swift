@@ -607,7 +607,8 @@ struct DashboardView: View {
                     ageBracket: bracket,
                     conditions: conditions,
                     sex: babySex,
-                    weightKg: babyWeightKg
+                    weightKg: babyWeightKg,
+                    refreshValue: demo.temperature
                 )
             case .hr:
                 VitalDetailSheet(
@@ -621,7 +622,8 @@ struct DashboardView: View {
                     ageBracket: bracket,
                     conditions: conditions,
                     sex: babySex,
-                    weightKg: babyWeightKg
+                    weightKg: babyWeightKg,
+                    refreshValue: demo.temperature
                 )
             case .spo2:
                 VitalDetailSheet(
@@ -635,7 +637,8 @@ struct DashboardView: View {
                     ageBracket: bracket,
                     conditions: conditions,
                     sex: babySex,
-                    weightKg: babyWeightKg
+                    weightKg: babyWeightKg,
+                    refreshValue: demo.temperature
                 )
             case .bp:
                 VitalDetailSheet(
@@ -649,7 +652,8 @@ struct DashboardView: View {
                     ageBracket: bracket,
                     conditions: conditions,
                     sex: babySex,
-                    weightKg: babyWeightKg
+                    weightKg: babyWeightKg,
+                    refreshValue: demo.temperature
                 )
             }
         }
@@ -924,6 +928,7 @@ struct DangerCard: View {
 struct VitalDetailSheet: View {
     let title: String
     let currentValue: String
+    let refreshValue: Double   // numeric reading used for AI refresh logic
 
     let primaryLabel: String
     let primaryRange: VitalRange
@@ -943,6 +948,8 @@ struct VitalDetailSheet: View {
     @State private var aiText: String = ""
     @State private var aiLoading: Bool = false
     @State private var aiError: String?
+    @State private var lastAIValue: Double?
+    @State private var lastAIStatus: String?
 
     var body: some View {
         ScrollView {
@@ -1015,6 +1022,23 @@ struct VitalDetailSheet: View {
         .onChange(of: sex) { _, _ in Task { await loadAI() } }
         .onChange(of: weightKg) { _, _ in Task { await loadAI() } }
         .onChange(of: conditions.sorted().joined(separator: ",")) { _, _ in Task { await loadAI() } }
+    }
+    
+    private var refreshValue: Double {
+        switch title {
+        case "Heart Rate":
+            return Double(currentValue.components(separatedBy: " ").first ?? "") ?? 0
+        case "Oxygen Level (SpO₂)":
+            return Double(currentValue.replacingOccurrences(of: "%", with: "")) ?? 0
+        case "Body Temperature":
+            return Double(currentValue.replacingOccurrences(of: " °C", with: "")) ?? 0
+        case "Blood Pressure":
+            // use systolic as primary signal
+            let parts = currentValue.components(separatedBy: "/")
+            return Double(parts.first ?? "") ?? 0
+        default:
+            return 0
+        }
     }
 
     // MARK: - AI UI
@@ -1106,8 +1130,13 @@ struct VitalDetailSheet: View {
         do {
             let text = try await GeminiService.shared.generate(prompt: prompt)
             aiText = text
+
+            // ✅ record last AI inputs so we can compare later
+            lastAIValue = refreshValue
+            lastAIStatus = statusLabel
         } catch {
-            aiError = "Could not generate explanation."
+            aiError = error.localizedDescription   // ✅ show real error
+            aiText = ""
         }
 
         aiLoading = false
